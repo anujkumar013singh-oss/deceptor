@@ -4,9 +4,11 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const multer = require('multer');
-const { nanoid } = require('nanoid');
+const crypto = require('crypto');
 const { protect } = require('../middleware/auth');
 const Video = require('../models/Video');
+
+const nanoid = (length = 10) => crypto.randomBytes(Math.ceil(length * 0.75)).toString('base64url').slice(0, length);
 const {
   cloudinary,
   getThumbnailUrl,
