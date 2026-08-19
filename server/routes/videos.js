@@ -46,12 +46,91 @@ const upload = multer({
   },
 });
 
-// ─── 1. DIRECT VIDEO UPLOAD WITH CLOUDINARY SYNC ───────────────────────────
+// ─── 0. SIGNED CLOUDINARY DIRECT UPLOAD (Bypasses Vercel Payload Limits) ───
+
+/**
+ * GET /api/videos/sign-upload
+ * Protected. Generates secure Cloudinary signature for direct browser-to-Cloudinary upload.
+ */
+router.get('/sign-upload', protect, (req, res) => {
+  try {
+    const { generateSignedUploadParams } = require('../lib/cloudinary');
+    const signatureData = generateSignedUploadParams('deceptor/videos');
+    res.status(200).json({ success: true, ...signatureData });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to sign upload request.' });
+  }
+});
+
+/**
+ * POST /api/videos/save-cloud
+ * Protected. Saves metadata after direct Cloudinary upload into MongoDB.
+ */
+router.post('/save-cloud', protect, async (req, res, next) => {
+  try {
+    const {
+      secure_url,
+      public_id,
+      duration,
+      width,
+      height,
+      bytes,
+      original_filename,
+      format,
+    } = req.body;
+
+    if (!secure_url) {
+      return res.status(400).json({ success: false, message: 'Cloudinary video URL is required.' });
+    }
+
+    const shortLinkId = nanoid(10);
+    const thumbnailUrl = getThumbnailUrl(public_id);
+
+    const video = await Video.create({
+      userId: req.user._id,
+      originalFilename: original_filename || 'video.mp4',
+      title: req.body.title || original_filename || 'Untitled Video',
+      cloudinaryPublicId: public_id,
+      cloudinarySecureUrl: secure_url,
+      cloudinaryUrl: secure_url,
+      streamUrl: secure_url,
+      status: 'ready',
+      durationSeconds: duration || 0,
+      fileSizeBytes: bytes || 0,
+      format: (format || 'mp4').toLowerCase(),
+      width: width || 1920,
+      height: height || 1080,
+      shortLinkId,
+      thumbnailUrl,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Video hosted permanently with universal address.',
+      video: {
+        _id: video._id,
+        shortLinkId: video.shortLinkId,
+        title: video.title,
+        originalFilename: video.originalFilename,
+        streamUrl: video.streamUrl,
+        cloudinarySecureUrl: video.cloudinarySecureUrl,
+        thumbnailUrl: video.thumbnailUrl,
+        durationSeconds: video.durationSeconds,
+        fileSizeBytes: video.fileSizeBytes,
+        createdAt: video.createdAt,
+      },
+      shareLink: `/v/${shortLinkId}`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── 1. DIRECT VIDEO UPLOAD WITH CLOUDINARY SYNC (Fallback) ───────────────────
 
 /**
  * POST /api/videos/upload-direct
- * Protected. Uploads video file directly, syncs to Cloudinary worldwide CDN,
- * and generates both universal web link and direct res.cloudinary.com URL.
+ * Protected. Uploads video file directly, syncs to Cloudinary worldwide CDN.
  */
 router.post('/upload-direct', protect, upload.single('video'), async (req, res, next) => {
   try {

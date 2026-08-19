@@ -137,63 +137,123 @@ const UploadPage = () => {
   const onDragLeave = () => setDragging(false);
 
   // ── Upload Execution ────────────────────────────────────────────────────
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (!selectedFile) return;
 
     setState(UPLOAD_STATES.UPLOADING);
     setProgress(0);
+    setError('');
 
-    const formData = new FormData();
-    formData.append('video', selectedFile);
-    formData.append('duration', videoMeta.duration);
-    formData.append('width', videoMeta.width);
-    formData.append('height', videoMeta.height);
-    if (videoMeta.thumbnailDataUrl) {
-      formData.append('thumbnailDataUrl', videoMeta.thumbnailDataUrl);
-    }
+    try {
+      // 1. Fetch Cloudinary secure upload signature from backend
+      const signRes = await api.get('/videos/sign-upload');
+      const { timestamp, signature, api_key, cloud_name, folder } = signRes.data;
 
-    const xhr = new XMLHttpRequest();
-    xhrRef.current = xhr;
-    const startTime = Date.now();
+      // 2. Prepare Direct Cloudinary Payload
+      const cloudFormData = new FormData();
+      cloudFormData.append('file', selectedFile);
+      cloudFormData.append('api_key', api_key);
+      cloudFormData.append('timestamp', timestamp);
+      cloudFormData.append('signature', signature);
+      cloudFormData.append('folder', folder);
 
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        const pct = Math.round((e.loaded / e.total) * 95);
-        setProgress(pct);
+      const xhr = new XMLHttpRequest();
+      xhrRef.current = xhr;
+      const startTime = Date.now();
 
-        const elapsedSec = (Date.now() - startTime) / 1000;
-        if (elapsedSec > 0.5) {
-          const speedMBps = (e.loaded / (1024 * 1024) / elapsedSec).toFixed(1);
-          setUploadSpeed(`${speedMBps} MB/s`);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 90);
+          setProgress(pct);
+
+          const elapsedSec = (Date.now() - startTime) / 1000;
+          if (elapsedSec > 0.5) {
+            const speedMBps = (e.loaded / (1024 * 1024) / elapsedSec).toFixed(1);
+            setUploadSpeed(`${speedMBps} MB/s`);
+          }
         }
-      }
-    };
+      };
 
-    xhr.onload = () => {
-      if (xhr.status === 200 || xhr.status === 201) {
-        const res = JSON.parse(xhr.responseText);
-        setProgress(100);
-        setState(UPLOAD_STATES.DONE);
-        setResult(res);
-        toast.success('Universal link active & ready!');
-      } else {
+      xhr.onload = async () => {
+        if (xhr.status === 200 || xhr.status === 201) {
+          setProgress(95);
+          const cData = JSON.parse(xhr.responseText);
+
+          // 3. Save metadata permanently into MongoDB
+          try {
+            const saveRes = await api.post('/videos/save-cloud', {
+              secure_url: cData.secure_url,
+              public_id: cData.public_id,
+              duration: cData.duration || videoMeta.duration,
+              width: cData.width || videoMeta.width,
+              height: cData.height || videoMeta.height,
+              bytes: cData.bytes || selectedFile.size,
+              original_filename: selectedFile.name,
+              format: cData.format,
+              title: selectedFile.name.replace(/\.[^/.]+$/, ''),
+            });
+
+            setProgress(100);
+            setState(UPLOAD_STATES.DONE);
+            setResult(saveRes.data);
+            toast.success('Universal link active & ready!');
+          } catch (saveErr) {
+            setState(UPLOAD_STATES.ERROR);
+            setError(saveErr?.response?.data?.message || 'Failed to register video record.');
+          }
+        } else {
+          // Direct Cloudinary upload error
+          setState(UPLOAD_STATES.ERROR);
+          const errMsg = xhr.responseText ? JSON.parse(xhr.responseText)?.error?.message : 'Cloudinary upload failed';
+          setError(errMsg || 'Cloud upload error.');
+          toast.error(errMsg || 'Upload failed');
+        }
+      };
+
+      xhr.onerror = () => {
         setState(UPLOAD_STATES.ERROR);
-        const errMsg = xhr.responseText ? JSON.parse(xhr.responseText)?.message : 'Upload failed';
-        setError(errMsg || 'Upload failed. Please try again.');
-        toast.error(errMsg || 'Upload failed');
-      }
-    };
+        setError('Network communication failed during cloud transfer.');
+        toast.error('Network error during upload');
+      };
 
-    xhr.onerror = () => {
-      setState(UPLOAD_STATES.ERROR);
-      setError('Network communication failed during transfer.');
-      toast.error('Network error during upload');
-    };
+      xhr.open('POST', `https://api.cloudinary.com/v1_1/${cloud_name}/video/upload`);
+      xhr.send(cloudFormData);
+    } catch (err) {
+      // Fallback: If signature fails, upload via backend endpoint
+      console.warn('Falling back to direct server upload:', err.message);
+      const formData = new FormData();
+      formData.append('video', selectedFile);
+      formData.append('duration', videoMeta.duration);
+      formData.append('width', videoMeta.width);
+      formData.append('height', videoMeta.height);
 
-    const token = localStorage.getItem('deceptor_token');
-    xhr.open('POST', '/api/videos/upload-direct');
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    xhr.send(formData);
+      const xhr = new XMLHttpRequest();
+      xhrRef.current = xhr;
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          setProgress(Math.round((e.loaded / e.total) * 95));
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status === 200 || xhr.status === 201) {
+          const res = JSON.parse(xhr.responseText);
+          setProgress(100);
+          setState(UPLOAD_STATES.DONE);
+          setResult(res);
+          toast.success('Universal link active & ready!');
+        } else {
+          setState(UPLOAD_STATES.ERROR);
+          setError('Upload failed. Please check network connection.');
+        }
+      };
+
+      const token = localStorage.getItem('deceptor_token');
+      xhr.open('POST', '/api/videos/upload-direct');
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.send(formData);
+    }
   };
 
   const videoData = result?.video || result?.data?.video || (result?.shortLinkId ? result : null);
