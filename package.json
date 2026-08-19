@@ -3,9 +3,16 @@
   "version": "1.0.0",
   "description": "Deceptor — Permanent Universal Video Hosting Platform",
   "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
   "scripts": {
-    "build": "npm --prefix client install && npm --prefix client run build",
+    "build": "npm run build --workspace=client",
     "start": "node server/index.js"
+  },
+  "devDependencies": {
+    "vite": "^8.2.0"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
