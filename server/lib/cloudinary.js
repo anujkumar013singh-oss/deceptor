@@ -1,13 +1,15 @@
 const cloudinary = require('cloudinary').v2;
 
-const CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || 'dhudpc4eu';
-const API_KEY = process.env.CLOUDINARY_API_KEY || '525641692227637';
-const API_SECRET = process.env.CLOUDINARY_API_SECRET || 'ryBMoe-ToH6Q7D6lekd2yKdSgLA';
+const CLOUD_NAME = 'dhudpc4eu';
+const API_KEY = '525641692227637';
+const API_SECRET = 'ryBMoe-ToH6Q7D6lekd2yKdSgLA';
 
 cloudinary.config({
-  cloud_name: CLOUD_NAME,
-  api_key: API_KEY,
-  api_secret: API_SECRET,
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY || API_KEY,
+  api_secret: (process.env.CLOUDINARY_API_SECRET && process.env.CLOUDINARY_API_SECRET.length === 27)
+    ? process.env.CLOUDINARY_API_SECRET
+    : API_SECRET,
   secure: true,
 });
 
@@ -17,41 +19,26 @@ cloudinary.config({
  */
 const generateSignedUploadParams = (folder = 'deceptor/videos') => {
   const timestamp = Math.round(Date.now() / 1000);
+  const activeSecret = (process.env.CLOUDINARY_API_SECRET && process.env.CLOUDINARY_API_SECRET.length === 27)
+    ? process.env.CLOUDINARY_API_SECRET
+    : API_SECRET;
+
+  const activeKey = process.env.CLOUDINARY_API_KEY || API_KEY;
+  const activeCloud = process.env.CLOUDINARY_CLOUD_NAME || CLOUD_NAME;
+
   const params = {
-    timestamp,
     folder,
-    resource_type: 'video',
-    // Allow up to 3 hours = 10800 seconds
-    // Cloudinary free tier: 100MB; paid plans: unlimited
+    timestamp,
   };
 
-  const signature = cloudinary.utils.api_sign_request(params, process.env.CLOUDINARY_API_SECRET);
+  const signature = cloudinary.utils.api_sign_request(params, activeSecret);
 
   return {
     timestamp,
     signature,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: activeKey,
+    cloud_name: activeCloud,
     folder,
-    resource_type: 'video',
-  };
-};
-
-/**
- * Generate a signed upload for profile pictures (image)
- */
-const generateImageUploadParams = (folder = 'deceptor/avatars') => {
-  const timestamp = Math.round(Date.now() / 1000);
-  const params = { timestamp, folder, resource_type: 'image' };
-  const signature = cloudinary.utils.api_sign_request(params, process.env.CLOUDINARY_API_SECRET);
-
-  return {
-    timestamp,
-    signature,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    folder,
-    resource_type: 'image',
   };
 };
 
@@ -102,7 +89,6 @@ const getThumbnailUrl = (publicId) => {
 module.exports = {
   cloudinary,
   generateSignedUploadParams,
-  generateImageUploadParams,
   deleteResource,
   getVideoInfo,
   getThumbnailUrl,
