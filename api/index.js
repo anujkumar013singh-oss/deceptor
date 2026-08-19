@@ -41,22 +41,28 @@ app.use(async (req, res, next) => {
   next();
 });
 
-// Routes
-app.get('/api/health', (req, res) => {
+// Health check on all variations
+app.get(['/api/health', '/health', '/api', '/'], (req, res) => {
   res.json({
     status: 'ok',
     app: 'Deceptor API',
-    env: process.env.NODE_ENV || 'development',
+    env: process.env.NODE_ENV || 'production',
     timestamp: new Date().toISOString(),
   });
 });
 
+// Mount routes for both /api-prefixed and direct routes
 app.use('/api/auth', authRoutes);
+app.use('/auth', authRoutes);
+
 app.use('/api/videos', videoRoutes);
+app.use('/videos', videoRoutes);
+
 app.use('/api/user', userRoutes);
+app.use('/user', userRoutes);
 
 // Public video link resolution
-app.use('/api/v', (req, res, next) => {
+app.use(['/api/v', '/v'], (req, res, next) => {
   const shortId = req.params[0] ? req.params[0].replace('/', '') : req.path.replace('/', '');
   req.url = `/public/${shortId}`;
   videoRoutes(req, res, next);
@@ -74,4 +80,6 @@ if (require.main === module) {
   });
 }
 
-module.exports = app;
+module.exports = (req, res) => {
+  return app(req, res);
+};
