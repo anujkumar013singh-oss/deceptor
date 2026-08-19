@@ -14,9 +14,12 @@ dist/
 build/
 .vite/
 
-# Logs
-*.log
-npm-debug.log*
+# Uploads & Media
+uploads/
+server/uploads/
+*.mp4
+*.webm
+*.mov
 
 # macOS
 .DS_Store
