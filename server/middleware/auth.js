@@ -1,6 +1,9 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+const JWT_SECRET = process.env.JWT_SECRET || 'deceptor_jwt_super_secret_key_2024_secure_production_token';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+
 const protect = async (req, res, next) => {
   try {
     let token;
@@ -13,7 +16,7 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Not authorized. No token provided.' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
     const user = await User.findById(decoded.id).select('-hashedPassword');
 
     if (!user) {
@@ -34,8 +37,8 @@ const protect = async (req, res, next) => {
 };
 
 const signToken = (userId) => {
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  return jwt.sign({ id: userId }, JWT_SECRET, {
+    expiresIn: JWT_EXPIRES_IN,
   });
 };
 
