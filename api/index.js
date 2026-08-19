@@ -1,92 +1,56 @@
-require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const helmet = require('helmet');
-const mongoose = require('mongoose');
-
-const connectDB = require('./lib/db');
-const authRoutes = require('./routes/auth');
-const videoRoutes = require('./routes/videos');
-const userRoutes = require('./routes/user');
-const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
-const PORT = process.env.PORT || 5001;
 
-// Middleware
-app.use(
-  cors({
-    origin: true,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json());
 
-app.use(
-  helmet({
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-  })
-);
-
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-
-// Health check endpoint (instant response, reports DB status)
-app.get(['/api/health', '/health', '/api', '/'], async (req, res) => {
-  const isDbReady = mongoose.connection?.readyState === 1;
-  if (!isDbReady) {
-    connectDB().catch(() => {});
-  }
-
-  res.status(200).json({
+// Direct test routes
+app.get('/api/health', (req, res) => {
+  res.json({
     status: 'ok',
-    app: 'Deceptor API',
-    database: isDbReady ? 'connected' : 'connecting_or_idle',
-    env: process.env.NODE_ENV || 'production',
+    message: 'Deceptor Serverless API is ACTIVE',
     timestamp: new Date().toISOString(),
   });
 });
 
-// Middleware for authenticated/database API routes
-app.use(async (req, res, next) => {
-  if (mongoose.connection?.readyState !== 1) {
-    await connectDB().catch((e) => {
-      console.warn('DB connect warning:', e.message);
-    });
-  }
-  next();
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'Deceptor Serverless API is ACTIVE',
+    timestamp: new Date().toISOString(),
+  });
 });
 
-// Mount routes
-app.use('/api/auth', authRoutes);
-app.use('/auth', authRoutes);
+// Import and mount core routes inside try/catch so any DB/route error is safely caught
+try {
+  const authRoutes = require('./routes/auth');
+  const videoRoutes = require('./routes/videos');
+  const userRoutes = require('./routes/user');
 
-app.use('/api/videos', videoRoutes);
-app.use('/videos', videoRoutes);
+  app.use('/api/auth', authRoutes);
+  app.use('/auth', authRoutes);
 
-app.use('/api/user', userRoutes);
-app.use('/user', userRoutes);
+  app.use('/api/videos', videoRoutes);
+  app.use('/videos', videoRoutes);
 
-// Public video link resolution
-app.use(['/api/v', '/v'], (req, res, next) => {
-  const shortId = req.params[0] ? req.params[0].replace('/', '') : req.path.replace('/', '');
-  req.url = `/public/${shortId}`;
-  videoRoutes(req, res, next);
-});
-
-// Error Handler
-app.use(errorHandler);
-
-// Standalone mode (local execution)
-if (require.main === module) {
-  connectDB().then(() => {
-    app.listen(PORT, () => {
-      console.log(`🚀 Deceptor API running on http://localhost:${PORT}`);
+  app.use('/api/user', userRoutes);
+  app.use('/user', userRoutes);
+} catch (loadError) {
+  console.error('Route mount error:', loadError);
+  app.use((req, res) => {
+    res.status(500).json({
+      success: false,
+      message: 'Module loading error: ' + loadError.message,
+      stack: loadError.stack,
     });
   });
 }
 
-module.exports = (req, res) => {
-  return app(req, res);
-};
+// Fallback 404
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: `Route ${req.originalUrl} not found on serverless API.` });
+});
+
+module.exports = app;
