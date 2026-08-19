@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Deceptor — Permanent Universal Video Hosting Platform",
   "private": true,
+  "type": "commonjs",
   "workspaces": [
     "client",
     "server"
