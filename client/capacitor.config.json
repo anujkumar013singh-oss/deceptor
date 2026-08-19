@@ -1,0 +1,21 @@
+{
+  "appId": "app.deceptor.video",
+  "appName": "Deceptor",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#0f172a",
+    "allowMixedContent": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#0f172a",
+      "showSpinner": false,
+      "androidSpinnerStyle": "large",
+      "spinnerColor": "#2563eb"
+    }
+  }
+}
