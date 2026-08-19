@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const multer = require('multer');
 const { nanoid } = require('nanoid');
 const { protect } = require('../middleware/auth');
@@ -12,13 +13,19 @@ const {
   deleteResource,
 } = require('../lib/cloudinary');
 
-// Ensure uploads directories exist
-const uploadDir = path.join(__dirname, '..', 'uploads', 'videos');
-const thumbDir = path.join(__dirname, '..', 'uploads', 'thumbnails');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-if (!fs.existsSync(thumbDir)) fs.mkdirSync(thumbDir, { recursive: true });
+// Ensure storage directories are serverless-safe (using os.tmpdir on Vercel)
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const uploadDir = isServerless ? path.join(os.tmpdir(), 'deceptor_videos') : path.join(__dirname, '..', 'uploads', 'videos');
+const thumbDir = isServerless ? path.join(os.tmpdir(), 'deceptor_thumbs') : path.join(__dirname, '..', 'uploads', 'thumbnails');
 
-// Configure Multer Disk Storage
+try {
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+  if (!fs.existsSync(thumbDir)) fs.mkdirSync(thumbDir, { recursive: true });
+} catch (e) {
+  console.warn('Storage directory initialization warning:', e.message);
+}
+
+// Configure Multer Disk Storage in serverless-safe directory
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir);
@@ -82,7 +89,7 @@ router.post('/upload-direct', protect, upload.single('video'), async (req, res, 
         if (cRes.height) height = cRes.height;
       }
     } catch (cErr) {
-      console.warn('Cloudinary upload warning, falling back to local stream:', cErr.message);
+      console.warn('Cloudinary upload warning, falling back to stream:', cErr.message);
     }
 
     // Save fallback client thumbnail if Cloudinary thumbnail wasn't created
