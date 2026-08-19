@@ -16,14 +16,16 @@ const transporter = nodemailer.createTransport({
   rateLimit: 5,
 });
 
-// Warm up and verify the SMTP connection pool on boot
-transporter.verify((error) => {
-  if (error) {
-    console.error('⚠️ SMTP Pool Warmup Error:', error.message);
-  } else {
-    console.log('⚡ SMTP Connection Pool Ready: Ultra-Fast Email Delivery Active');
-  }
-});
+// Verify SMTP connection pool if credentials exist
+if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+  transporter.verify((error) => {
+    if (error) {
+      console.error('⚠️ SMTP Pool Warmup Warning:', error.message);
+    } else {
+      console.log('⚡ SMTP Connection Pool Ready: Ultra-Fast Email Delivery Active');
+    }
+  });
+}
 
 /**
  * Send an OTP email via Brevo SMTP with Deceptor's dark cybernetic design

@@ -4,9 +4,26 @@
   "description": "Deceptor — Permanent Universal Video Hosting Platform",
   "private": true,
   "scripts": {
-    "install:all": "npm install && cd client && npm install && cd ../server && npm install",
+    "dev:server": "cd server && node index.js",
+    "dev:client": "cd client && npm run dev",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build": "cd client && npm install && npm run build",
-    "start": "cd server && node index.js"
+    "start": "node server/index.js",
+    "postinstall": "cd client && npm install && cd ../server && npm install"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.5.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.9.3",
+    "multer": "^2.2.0",
+    "nanoid": "^5.0.9",
+    "nodemailer": "^6.9.16"
   },
   "keywords": ["video-hosting", "lossless-streaming", "react", "nodejs", "express", "mongodb"],
   "author": "Deceptor Team",

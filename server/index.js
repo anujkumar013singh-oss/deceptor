@@ -12,22 +12,15 @@ const errorHandler = require('./middleware/errorHandler');
 // ─── App Setup ────────────────────────────────────────────────────────────────
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
 app.use(
   cors({
-    origin: [
-      process.env.CLIENT_URL || 'http://localhost:5173',
-      'http://localhost:3000',
-      // Capacitor WebView origins
-      'capacitor://localhost',
-      'ionic://localhost',
-      'http://localhost',
-    ],
+    origin: true,
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
@@ -38,13 +31,23 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Ensure DB is connected for serverless invocations
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+  } catch (e) {
+    console.error('Database connection error in request:', e.message);
+  }
+  next();
+});
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', app: 'Deceptor API', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', app: 'Deceptor API', env: process.env.NODE_ENV || 'development', timestamp: new Date().toISOString() });
 });
 
 app.use('/api/auth', authRoutes);
@@ -68,15 +71,14 @@ app.use((req, res) => {
 
 app.use(errorHandler);
 
-// ─── Start Server ─────────────────────────────────────────────────────────────
+// ─── Start Server (Standalone only) ──────────────────────────────────────────
 
-const start = async () => {
-  await connectDB();
-  app.listen(PORT, () => {
-    console.log(`🚀 Deceptor API running on http://localhost:${PORT}`);
+if (process.env.VERCEL !== '1' && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  connectDB().then(() => {
+    app.listen(PORT, () => {
+      console.log(`🚀 Deceptor API running on http://localhost:${PORT}`);
+    });
   });
-};
-
-start();
+}
 
 module.exports = app;
