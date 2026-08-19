@@ -196,11 +196,14 @@ const UploadPage = () => {
     xhr.send(formData);
   };
 
+  const videoData = result?.video || result?.data?.video || (result?.shortLinkId ? result : null);
+  const shortId = videoData?.shortLinkId || result?.shortLinkId;
+  const universalLink = shortId ? getUniversalAddress(shortId) : '';
+
   const handleCopyLink = () => {
-    if (!result?.video?.shortLinkId) return;
-    const universalUrl = getUniversalAddress(result.video.shortLinkId);
-    copyToClipboard(universalUrl);
-    toast.success('Permanent Deceptor link copied!');
+    if (!universalLink) return;
+    copyToClipboard(universalLink);
+    toast.success('Universal link copied to clipboard!');
   };
 
   const handleReset = () => {
@@ -211,10 +214,6 @@ const UploadPage = () => {
     setResult(null);
     setError('');
   };
-
-  const universalLink = result?.video?.shortLinkId
-    ? getUniversalAddress(result.video.shortLinkId)
-    : '';
 
   return (
     <div className="max-w-5xl mx-auto space-y-8">
@@ -468,7 +467,7 @@ const UploadPage = () => {
               </div>
               <div className="aspect-video w-full rounded-2xl overflow-hidden bg-black border border-white/15 shadow-2xl relative group">
                 <video
-                  src={result?.video?.streamUrl || result?.directCloudUrl}
+                  src={videoData?.streamUrl || result?.directCloudUrl || (shortId ? `/api/videos/stream/${shortId}` : '')}
                   controls
                   playsInline
                   className="w-full h-full object-contain"
@@ -477,32 +476,35 @@ const UploadPage = () => {
             </div>
 
             {/* Video Telemetry Summary */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 text-center">
-                <div className="text-xs text-slate-400">File Name</div>
-                <div className="text-sm font-bold text-white truncate mt-1">
-                  {result.video.originalFilename}
+            {videoData && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 text-center">
+                  <div className="text-xs text-slate-400">File Name</div>
+                  <div className="text-sm font-bold text-white truncate mt-1">
+                    {videoData.originalFilename || videoData.title || selectedFile?.name || 'video.mp4'}
+                  </div>
+                </div>
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 text-center">
+                  <div className="text-xs text-slate-400">Duration</div>
+                  <div className="text-sm font-bold text-cyan-400 mt-1">
+                    {formatDuration(videoData.durationSeconds || videoMeta.duration)}
+                  </div>
+                </div>
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 text-center">
+                  <div className="text-xs text-slate-400">File Size</div>
+                  <div className="text-sm font-bold text-emerald-400 mt-1">
+                    {formatFileSize(videoData.fileSizeBytes || selectedFile?.size)}
+                  </div>
+                </div>
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 text-center">
+                  <div className="text-xs text-slate-400">Status</div>
+                  <div className="text-sm font-bold text-emerald-400 mt-1 uppercase flex items-center justify-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Permanent Active
+                  </div>
                 </div>
               </div>
-              <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 text-center">
-                <div className="text-xs text-slate-400">Duration</div>
-                <div className="text-sm font-bold text-cyan-400 mt-1">
-                  {formatDuration(result.video.durationSeconds)}
-                </div>
-              </div>
-              <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 text-center">
-                <div className="text-xs text-slate-400">File Size</div>
-                <div className="text-sm font-bold text-emerald-400 mt-1">
-                  {formatFileSize(result.video.fileSizeBytes)}
-                </div>
-              </div>
-              <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 text-center">
-                <div className="text-xs text-slate-400">Status</div>
-                <div className="text-sm font-bold text-purple-400 mt-1 uppercase">
-                  Permanent Active
-                </div>
-              </div>
-            </div>
+            )}
 
             <div className="flex justify-center pt-4">
               <button

@@ -43,8 +43,8 @@ export const copyToClipboard = async (text) => {
 };
 
 export const getUniversalAddress = (shortLinkId) => {
-  const customDomain = import.meta.env.VITE_APP_URL || 'https://deceptor.vercel.app';
-  return `${customDomain.replace(/\/$/, '')}/v/${shortLinkId}`;
+  const base = import.meta.env.VITE_APP_URL || (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://deceptor-link.vercel.app');
+  return `${base.replace(/\/$/, '')}/v/${shortLinkId}`;
 };
 
 export const getShareUrl = (shortLinkId) => {
