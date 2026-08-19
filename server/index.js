@@ -73,7 +73,7 @@ app.use(errorHandler);
 
 // ─── Start Server (Standalone only) ──────────────────────────────────────────
 
-if (process.env.VERCEL !== '1' && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+if (require.main === module) {
   connectDB().then(() => {
     app.listen(PORT, () => {
       console.log(`🚀 Deceptor API running on http://localhost:${PORT}`);
