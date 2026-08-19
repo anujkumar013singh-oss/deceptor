@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const mongoose = require('mongoose');
 
 const connectDB = require('./lib/db');
 const authRoutes = require('./routes/auth');
@@ -31,27 +32,33 @@ app.use(
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Ensure DB is connected for serverless invocations
-app.use(async (req, res, next) => {
-  try {
-    await connectDB();
-  } catch (e) {
-    console.error('Database connection error in request:', e.message);
+// Health check endpoint (instant response, reports DB status)
+app.get(['/api/health', '/health', '/api', '/'], async (req, res) => {
+  const isDbReady = mongoose.connection?.readyState === 1;
+  if (!isDbReady) {
+    connectDB().catch(() => {});
   }
-  next();
-});
 
-// Health check on all variations
-app.get(['/api/health', '/health', '/api', '/'], (req, res) => {
-  res.json({
+  res.status(200).json({
     status: 'ok',
     app: 'Deceptor API',
+    database: isDbReady ? 'connected' : 'connecting_or_idle',
     env: process.env.NODE_ENV || 'production',
     timestamp: new Date().toISOString(),
   });
 });
 
-// Mount routes for both /api-prefixed and direct routes
+// Middleware for authenticated/database API routes
+app.use(async (req, res, next) => {
+  if (mongoose.connection?.readyState !== 1) {
+    await connectDB().catch((e) => {
+      console.warn('DB connect warning:', e.message);
+    });
+  }
+  next();
+});
+
+// Mount routes
 app.use('/api/auth', authRoutes);
 app.use('/auth', authRoutes);
 
