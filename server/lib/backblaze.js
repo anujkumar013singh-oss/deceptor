@@ -94,7 +94,7 @@ const authorizeAccount = async (forceRefresh = false) => {
 };
 
 /**
- * Get Direct Upload URL & Token for Browser Ingest
+ * Get Direct Upload URL & Token for Single Ingest (< 10MB)
  */
 const getUploadUrl = async () => {
   let auth = await authorizeAccount();
@@ -119,7 +119,6 @@ const getUploadUrl = async () => {
     };
   } catch (err) {
     if (err.status === 401 || err.b2Code === 'unauthorized' || err.b2Code === 'expired_auth_token') {
-      // Refresh token and retry once
       auth = await authorizeAccount(true);
       const res = await b2Request(
         auth.apiUrl,
@@ -138,6 +137,148 @@ const getUploadUrl = async () => {
         downloadUrl: auth.downloadUrl,
         bucketName: auth.bucketName,
       };
+    }
+    throw err;
+  }
+};
+
+/**
+ * ── PARALLEL MULTI-PART ACCELERATION ENGINE ─────────────────────────────────
+ */
+
+/**
+ * Start a Multi-Part Large File Upload Session
+ */
+const startLargeFile = async (fileName, contentType = 'video/mp4') => {
+  let auth = await authorizeAccount();
+  try {
+    const res = await b2Request(
+      auth.apiUrl,
+      '/b2api/v2/b2_start_large_file',
+      'POST',
+      {
+        Authorization: auth.authorizationToken,
+        'Content-Type': 'application/json',
+      },
+      {
+        bucketId: auth.bucketId,
+        fileName,
+        contentType,
+      }
+    );
+    return {
+      fileId: res.fileId,
+      fileName: res.fileName,
+      bucketId: res.bucketId,
+    };
+  } catch (err) {
+    if (err.status === 401) {
+      auth = await authorizeAccount(true);
+      const res = await b2Request(
+        auth.apiUrl,
+        '/b2api/v2/b2_start_large_file',
+        'POST',
+        {
+          Authorization: auth.authorizationToken,
+          'Content-Type': 'application/json',
+        },
+        {
+          bucketId: auth.bucketId,
+          fileName,
+          contentType,
+        }
+      );
+      return {
+        fileId: res.fileId,
+        fileName: res.fileName,
+        bucketId: res.bucketId,
+      };
+    }
+    throw err;
+  }
+};
+
+/**
+ * Get Upload Part URL & Token for a chunk worker
+ */
+const getUploadPartUrl = async (fileId) => {
+  let auth = await authorizeAccount();
+  try {
+    const res = await b2Request(
+      auth.apiUrl,
+      '/b2api/v2/b2_get_upload_part_url',
+      'POST',
+      {
+        Authorization: auth.authorizationToken,
+        'Content-Type': 'application/json',
+      },
+      { fileId }
+    );
+    return {
+      uploadUrl: res.uploadUrl,
+      authorizationToken: res.authorizationToken,
+      fileId: res.fileId,
+    };
+  } catch (err) {
+    if (err.status === 401) {
+      auth = await authorizeAccount(true);
+      const res = await b2Request(
+        auth.apiUrl,
+        '/b2api/v2/b2_get_upload_part_url',
+        'POST',
+        {
+          Authorization: auth.authorizationToken,
+          'Content-Type': 'application/json',
+        },
+        { fileId }
+      );
+      return {
+        uploadUrl: res.uploadUrl,
+        authorizationToken: res.authorizationToken,
+        fileId: res.fileId,
+      };
+    }
+    throw err;
+  }
+};
+
+/**
+ * Finish Multi-Part Large File Upload Session
+ */
+const finishLargeFile = async (fileId, partSha1Array) => {
+  let auth = await authorizeAccount();
+  try {
+    const res = await b2Request(
+      auth.apiUrl,
+      '/b2api/v2/b2_finish_large_file',
+      'POST',
+      {
+        Authorization: auth.authorizationToken,
+        'Content-Type': 'application/json',
+      },
+      {
+        fileId,
+        partSha1Array,
+      }
+    );
+    return res;
+  } catch (err) {
+    if (err.status === 401) {
+      auth = await authorizeAccount(true);
+      const res = await b2Request(
+        auth.apiUrl,
+        '/b2api/v2/b2_finish_large_file',
+        'POST',
+        {
+          Authorization: auth.authorizationToken,
+          'Content-Type': 'application/json',
+        },
+        {
+          fileId,
+          partSha1Array,
+        }
+      );
+      return res;
     }
     throw err;
   }
@@ -237,6 +378,9 @@ module.exports = {
   B2_BUCKET_ID,
   authorizeAccount,
   getUploadUrl,
+  startLargeFile,
+  getUploadPartUrl,
+  finishLargeFile,
   getDownloadAuthToken,
   getStreamUrl,
   deleteFile,

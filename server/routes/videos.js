@@ -70,6 +70,51 @@ router.get('/sign-upload', protect, async (req, res) => {
 });
 
 /**
+ * POST /api/videos/b2/start-large-file
+ * Protected. Initializes a multi-part turbo upload session.
+ */
+router.post('/b2/start-large-file', protect, async (req, res) => {
+  try {
+    const { fileName, contentType } = req.body;
+    const result = await b2.startLargeFile(fileName, contentType || 'video/mp4');
+    res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    console.error('B2 Start Large File Error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * POST /api/videos/b2/get-part-url
+ * Protected. Generates upload part endpoint for parallel chunk workers.
+ */
+router.post('/b2/get-part-url', protect, async (req, res) => {
+  try {
+    const { fileId } = req.body;
+    const result = await b2.getUploadPartUrl(fileId);
+    res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    console.error('B2 Get Part URL Error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * POST /api/videos/b2/finish-large-file
+ * Protected. Commits all uploaded parts into the final video file.
+ */
+router.post('/b2/finish-large-file', protect, async (req, res) => {
+  try {
+    const { fileId, partSha1Array } = req.body;
+    const result = await b2.finishLargeFile(fileId, partSha1Array);
+    res.status(200).json({ success: true, result });
+  } catch (err) {
+    console.error('B2 Finish Large File Error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
  * POST /api/videos/save-cloud
  * Protected. Saves video metadata after high-speed Backblaze B2 upload into MongoDB.
  */
