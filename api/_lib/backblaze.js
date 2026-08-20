@@ -19,6 +19,11 @@ let downloadAuthCache = {
   expiresAt: 0,
 };
 
+let downloadAttachmentAuthCache = {
+  authorizationToken: null,
+  expiresAt: 0,
+};
+
 /**
  * Helper to make HTTPS requests to B2 API
  */
@@ -340,23 +345,8 @@ const getDownloadAuthToken = async (validDurationSeconds = 604800) => {
 };
 
 /**
- * Build direct high-speed streaming URL for a Backblaze video
- */
-const getStreamUrl = async (fileName) => {
-  const auth = await authorizeAccount();
-  const token = await getDownloadAuthToken();
-  const encodedName = fileName
-    .split('/')
-    .map((seg) => encodeURIComponent(seg))
-    .join('/');
-/**
  * Get Download Authorization Token with Content-Disposition: attachment for direct Chrome downloads
  */
-let downloadAttachmentAuthCache = {
-  authorizationToken: null,
-  expiresAt: 0,
-};
-
 const getAttachmentAuthToken = async (validDurationSeconds = 604800) => {
   const now = Date.now();
   if (downloadAttachmentAuthCache.authorizationToken && downloadAttachmentAuthCache.expiresAt > now) {
@@ -412,6 +402,19 @@ const getAttachmentAuthToken = async (validDurationSeconds = 604800) => {
 };
 
 /**
+ * Build direct high-speed streaming URL for a Backblaze video
+ */
+const getStreamUrl = async (fileName) => {
+  const auth = await authorizeAccount();
+  const token = await getDownloadAuthToken();
+  const encodedName = fileName
+    .split('/')
+    .map((seg) => encodeURIComponent(seg))
+    .join('/');
+  return `${auth.downloadUrl}/file/${auth.bucketName}/${encodedName}?Authorization=${token}`;
+};
+
+/**
  * Build direct file download URL that forces Chrome to save directly into user's Downloads folder
  */
 const getAttachmentDownloadUrl = async (fileName) => {
@@ -454,6 +457,7 @@ module.exports = {
   getUploadPartUrl,
   finishLargeFile,
   getDownloadAuthToken,
+  getAttachmentAuthToken,
   getStreamUrl,
   getAttachmentDownloadUrl,
   deleteFile,
