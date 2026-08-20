@@ -432,7 +432,7 @@ const UploadPage = () => {
                         </div>
                         <div>
                           <span className="text-sm font-bold text-white tracking-wide block font-display">
-                            6x Multi-Stream Ingest Active
+                            8x Multi-Stream Ingest Active
                           </span>
                           <span className="text-xs text-slate-400 font-medium">
                             Parallel encrypted chunk channels connected
@@ -488,21 +488,21 @@ const UploadPage = () => {
                       <div className="flex items-center gap-2 text-slate-300">
                         <span className="font-bold text-white">Speed:</span>
                         <span className="text-cyan-300 font-mono font-bold bg-cyan-950/40 px-2 py-0.5 rounded-md border border-cyan-500/30">
-                          {uploadSpeed || '6x Parallel Ingest'}
+                          {uploadSpeed || '8x Parallel Ingest'}
                         </span>
                       </div>
 
-                      {/* 6 Animated Equalizer Bars */}
+                      {/* 8 Animated Equalizer Bars */}
                       <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/[0.03] border border-white/10">
                         <span className="text-[11px] text-slate-400 font-semibold mr-1">Streams:</span>
-                        {[...Array(6)].map((_, i) => (
+                        {[...Array(8)].map((_, i) => (
                           <span
                             key={i}
                             className="w-1 bg-cyan-400 rounded-full animate-pulse"
                             style={{
-                              height: `${12 + ((i * 4) % 10)}px`,
-                              animationDelay: `${i * 150}ms`,
-                              animationDuration: '800ms',
+                              height: `${10 + ((i * 3) % 12)}px`,
+                              animationDelay: `${i * 120}ms`,
+                              animationDuration: '700ms',
                             }}
                           />
                         ))}
@@ -510,7 +510,7 @@ const UploadPage = () => {
 
                       <div className="text-slate-400 flex items-center gap-1.5 font-medium">
                         <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                        <span>Sub-90s Multi-Socket Acceleration</span>
+                        <span>8-Socket Ultra-Fast Acceleration</span>
                       </div>
                     </div>
                   </div>

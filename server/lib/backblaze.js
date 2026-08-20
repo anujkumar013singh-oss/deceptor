@@ -248,6 +248,15 @@ const getUploadPartUrl = async (fileId) => {
 };
 
 /**
+ * Get Batch of Upload Part URLs & Tokens in parallel for ultra-low latency ingest
+ */
+const getUploadPartUrlsBatch = async (fileId, count = 8) => {
+  const safeCount = Math.min(Math.max(1, count), 16);
+  const promises = Array.from({ length: safeCount }, () => getUploadPartUrl(fileId));
+  return Promise.all(promises);
+};
+
+/**
  * Finish Multi-Part Large File Upload Session
  */
 const finishLargeFile = async (fileId, partSha1Array) => {
@@ -455,6 +464,7 @@ module.exports = {
   getUploadUrl,
   startLargeFile,
   getUploadPartUrl,
+  getUploadPartUrlsBatch,
   finishLargeFile,
   getDownloadAuthToken,
   getAttachmentAuthToken,

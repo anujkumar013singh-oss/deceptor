@@ -100,6 +100,21 @@ router.post('/b2/get-part-url', protect, async (req, res) => {
 });
 
 /**
+ * POST /api/videos/b2/get-part-urls-batch
+ * Protected. Generates a pool of upload endpoints in one single roundtrip to eliminate transfer latency.
+ */
+router.post('/b2/get-part-urls-batch', protect, async (req, res) => {
+  try {
+    const { fileId, count } = req.body;
+    const endpoints = await b2.getUploadPartUrlsBatch(fileId, count || 8);
+    res.status(200).json({ success: true, endpoints });
+  } catch (err) {
+    console.error('B2 Get Part URLs Batch Error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
  * POST /api/videos/b2/finish-large-file
  * Protected. Commits all uploaded parts into the final video file.
  */

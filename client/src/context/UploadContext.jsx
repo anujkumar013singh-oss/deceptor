@@ -19,12 +19,12 @@ const computeSha1 = async (arrayBuffer) => {
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 };
 
-// Calculate optimal chunk size to maximize TCP throughput and minimize roundtrips
+// Dynamic chunk sizing to maximize TCP pipe saturation and minimize roundtrips
 const getOptimalChunkSize = (fileSizeBytes) => {
-  if (fileSizeBytes < 50 * 1024 * 1024) return 6 * 1024 * 1024; // 6MB
-  if (fileSizeBytes < 200 * 1024 * 1024) return 10 * 1024 * 1024; // 10MB
-  if (fileSizeBytes < 800 * 1024 * 1024) return 16 * 1024 * 1024; // 16MB
-  return 24 * 1024 * 1024; // 24MB for 1-3 hour multi-GB files
+  if (fileSizeBytes < 60 * 1024 * 1024) return 8 * 1024 * 1024; // 8MB
+  if (fileSizeBytes < 300 * 1024 * 1024) return 16 * 1024 * 1024; // 16MB
+  if (fileSizeBytes < 1000 * 1024 * 1024) return 24 * 1024 * 1024; // 24MB
+  return 32 * 1024 * 1024; // 32MB for multi-GB 3-hour videos
 };
 
 export const UploadProvider = ({ children }) => {
@@ -40,7 +40,7 @@ export const UploadProvider = ({ children }) => {
   const isAbortedRef = useRef(false);
   const startTimeRef = useRef(null);
 
-  // ── High-Speed Multi-Stream Parallel Turbo Ingest with Self-Healing Retries ──
+  // ── 8x Multi-Stream Parallel Turbo Ingest Engine with Sliding Velocity ────
   const performUpload = useCallback(async (file, meta) => {
     if (!file) return;
 
@@ -49,7 +49,7 @@ export const UploadProvider = ({ children }) => {
     setState(UPLOAD_STATES.UPLOADING);
     setProgress(0);
     setError('');
-    setEtaText('Initializing high-speed parallel channels...');
+    setEtaText('Initializing high-speed multi-socket engine...');
     startTimeRef.current = Date.now();
 
     const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
@@ -58,12 +58,16 @@ export const UploadProvider = ({ children }) => {
     const PART_SIZE = getOptimalChunkSize(file.size);
     const totalParts = Math.ceil(file.size / PART_SIZE);
 
+    // Sliding window velocity tracker for accurate, smooth ETA
+    const speedSamples = []; // { time, loaded }
+    let lastEtaSecs = null;
+
     try {
       let finalFileId = null;
       let finalFileName = cloudFileName;
 
-      // ── FAST PATH 1: Small files (< 12MB) -> Single direct stream ─────────
-      if (file.size < 12 * 1024 * 1024 || totalParts < 2) {
+      // ── FAST PATH 1: Small files (< 16MB) -> Single direct stream ─────────
+      if (file.size < 16 * 1024 * 1024 || totalParts < 2) {
         let singleRes = null;
         let attempts = 0;
 
@@ -82,20 +86,25 @@ export const UploadProvider = ({ children }) => {
                   const pct = Math.min(94, Math.round((e.loaded / e.total) * 94));
                   setProgress(pct);
 
-                  const elapsedSec = (Date.now() - startTimeRef.current) / 1000;
-                  if (elapsedSec > 0.3) {
-                    const bytesPerSec = e.loaded / elapsedSec;
-                    const speedMB = (bytesPerSec / (1024 * 1024)).toFixed(1);
-                    setUploadSpeed(`${speedMB} MB/s (Turbo Stream)`);
-
-                    const remainingBytes = e.total - e.loaded;
-                    const remainingSecs = Math.max(1, Math.round(remainingBytes / bytesPerSec));
-                    setEtaText(
-                      remainingSecs < 60
-                        ? `${remainingSecs}s remaining`
-                        : `${Math.floor(remainingSecs / 60)}m ${remainingSecs % 60 < 10 ? '0' : ''}${remainingSecs % 60}s remaining`
-                    );
+                  const now = Date.now();
+                  speedSamples.push({ time: now, loaded: e.loaded });
+                  while (speedSamples.length > 2 && now - speedSamples[0].time > 2500) {
+                    speedSamples.shift();
                   }
+
+                  const dt = (now - speedSamples[0].time) / 1000;
+                  const dBytes = e.loaded - speedSamples[0].loaded;
+                  const currentSpeed = dt > 0.15 ? dBytes / dt : e.loaded / ((now - startTimeRef.current) / 1000);
+                  const speedMB = (currentSpeed / (1024 * 1024)).toFixed(1);
+                  setUploadSpeed(`${speedMB} MB/s (Turbo Stream)`);
+
+                  const remBytes = e.total - e.loaded;
+                  const remSecs = Math.max(1, Math.round(remBytes / Math.max(currentSpeed, 1024)));
+                  setEtaText(
+                    remSecs < 60
+                      ? `${remSecs}s remaining`
+                      : `${Math.floor(remSecs / 60)}m ${remSecs % 60 < 10 ? '0' : ''}${remSecs % 60}s remaining`
+                  );
                 }
               };
 
@@ -119,14 +128,14 @@ export const UploadProvider = ({ children }) => {
             });
           } catch (err) {
             if (attempts >= 4) throw err;
-            await new Promise((r) => setTimeout(r, 500 * attempts));
+            await new Promise((r) => setTimeout(r, 400 * attempts));
           }
         }
 
         finalFileId = singleRes.fileId;
         finalFileName = singleRes.fileName || cloudFileName;
       } else {
-        // ── FAST PATH 2: Multi-Stream Turbo Ingest with Self-Healing Workers ─
+        // ── FAST PATH 2: 8x Parallel Multi-Socket Turbo Ingest ──────────────
         const startRes = await api.post('/videos/b2/start-large-file', {
           fileName: cloudFileName,
           contentType: file.type || 'video/mp4',
@@ -136,19 +145,56 @@ export const UploadProvider = ({ children }) => {
         finalFileId = fileId;
         finalFileName = startRes.data.fileName || cloudFileName;
 
-        const CONCURRENCY = Math.min(6, totalParts); // 6 concurrent streaming sockets
+        const CONCURRENCY = Math.min(8, totalParts); // 8 parallel sockets
         const partSha1Array = new Array(totalParts);
         const partLoadedBytes = new Array(totalParts).fill(0);
         let nextPartIndex = 0;
 
-        // Worker: fetches fresh part URL and retries automatically up to 4 times per chunk on any network blip
+        // Pre-fetched Endpoint Pool for ZERO-latency chunk handoff
+        const endpointPool = [];
+        let isFetchingEndpoints = false;
+
+        const refillEndpointPool = async () => {
+          if (isFetchingEndpoints || isAbortedRef.current) return;
+          isFetchingEndpoints = true;
+          try {
+            const batchRes = await api.post('/videos/b2/get-part-urls-batch', {
+              fileId,
+              count: 8,
+            });
+            if (batchRes.data?.endpoints) {
+              endpointPool.push(...batchRes.data.endpoints);
+            }
+          } catch (err) {
+            console.warn('Batch endpoint fetch fallback:', err.message);
+          } finally {
+            isFetchingEndpoints = false;
+          }
+        };
+
+        // Initial burst pre-fetch of 8 endpoints
+        await refillEndpointPool();
+
+        const acquirePartEndpoint = async () => {
+          if (endpointPool.length < 4) {
+            refillEndpointPool().catch(() => {});
+          }
+          if (endpointPool.length > 0) {
+            return endpointPool.pop();
+          }
+          // Fallback single endpoint fetch
+          const single = await api.post('/videos/b2/get-part-url', { fileId });
+          return single.data;
+        };
+
+        // Worker: transfers chunk with self-healing retries
         const uploadChunkWithRetry = async (index) => {
           const partNumber = index + 1;
           const startByte = index * PART_SIZE;
           const endByte = Math.min(file.size, startByte + PART_SIZE);
           const chunkBlob = file.slice(startByte, endByte);
 
-          // Read buffer & compute hardware SHA-1
+          // Read buffer & hardware compute SHA-1
           const arrayBuffer = await chunkBlob.arrayBuffer();
           const sha1 = await computeSha1(arrayBuffer);
 
@@ -159,11 +205,8 @@ export const UploadProvider = ({ children }) => {
           while (!chunkSuccess && attempt < MAX_RETRIES && !isAbortedRef.current) {
             attempt++;
             try {
-              // 1. Get fresh upload endpoint for this attempt
-              const partRes = await api.post('/videos/b2/get-part-url', { fileId });
-              const { uploadUrl, authorizationToken } = partRes.data;
+              const endpoint = await acquirePartEndpoint();
 
-              // 2. Upload binary buffer
               await new Promise((resolve, reject) => {
                 if (isAbortedRef.current) return reject(new Error('Upload aborted'));
 
@@ -179,24 +222,33 @@ export const UploadProvider = ({ children }) => {
                     const pct = Math.min(95, Math.round((totalLoaded / file.size) * 95));
                     setProgress(pct);
 
-                    const elapsedSec = (Date.now() - startTimeRef.current) / 1000;
-                    if (elapsedSec > 0.3) {
-                      const bytesPerSec = totalLoaded / elapsedSec;
-                      const speedMB = (bytesPerSec / (1024 * 1024)).toFixed(1);
-                      setUploadSpeed(`${speedMB} MB/s (6x Turbo Acceleration)`);
-
-                      const remainingBytes = file.size - totalLoaded;
-                      const remainingSecs = Math.max(1, Math.round(remainingBytes / bytesPerSec));
-                      let etaDisplay = '';
-                      if (remainingSecs < 60) {
-                        etaDisplay = `${remainingSecs}s remaining`;
-                      } else {
-                        const mins = Math.floor(remainingSecs / 60);
-                        const secs = remainingSecs % 60;
-                        etaDisplay = `${mins}m ${secs < 10 ? '0' : ''}${secs}s remaining`;
-                      }
-                      setEtaText(etaDisplay);
+                    const now = Date.now();
+                    speedSamples.push({ time: now, loaded: totalLoaded });
+                    while (speedSamples.length > 2 && now - speedSamples[0].time > 2500) {
+                      speedSamples.shift();
                     }
+
+                    const dt = (now - speedSamples[0].time) / 1000;
+                    const dBytes = totalLoaded - speedSamples[0].loaded;
+                    const currentSpeed = dt > 0.15 ? dBytes / dt : totalLoaded / ((now - startTimeRef.current) / 1000);
+                    const speedMB = (currentSpeed / (1024 * 1024)).toFixed(1);
+                    setUploadSpeed(`${speedMB} MB/s (8x Turbo Acceleration)`);
+
+                    const remainingBytes = file.size - totalLoaded;
+                    const rawEtaSecs = Math.max(1, Math.round(remainingBytes / Math.max(currentSpeed, 1024)));
+
+                    // Smooth rolling EMA on seconds remaining to eliminate jitter
+                    lastEtaSecs = lastEtaSecs === null ? rawEtaSecs : Math.round(lastEtaSecs * 0.4 + rawEtaSecs * 0.6);
+
+                    let etaDisplay = '';
+                    if (lastEtaSecs < 60) {
+                      etaDisplay = `${lastEtaSecs}s remaining`;
+                    } else {
+                      const mins = Math.floor(lastEtaSecs / 60);
+                      const secs = lastEtaSecs % 60;
+                      etaDisplay = `${mins}m ${secs < 10 ? '0' : ''}${secs}s remaining`;
+                    }
+                    setEtaText(etaDisplay);
                   }
                 };
 
@@ -220,8 +272,8 @@ export const UploadProvider = ({ children }) => {
                 xhr.ontimeout = () => reject(new Error(`Stream ${partNumber} timeout`));
                 xhr.timeout = 120000; // 2 minutes per chunk timeout
 
-                xhr.open('POST', uploadUrl, true);
-                xhr.setRequestHeader('Authorization', authorizationToken);
+                xhr.open('POST', endpoint.uploadUrl, true);
+                xhr.setRequestHeader('Authorization', endpoint.authorizationToken);
                 xhr.setRequestHeader('X-Bz-Part-Number', String(partNumber));
                 xhr.setRequestHeader('Content-Length', String(arrayBuffer.byteLength));
                 xhr.setRequestHeader('X-Bz-Content-Sha1', sha1);
@@ -231,12 +283,11 @@ export const UploadProvider = ({ children }) => {
               chunkSuccess = true;
             } catch (chunkErr) {
               if (isAbortedRef.current) throw chunkErr;
-              console.warn(`Chunk ${partNumber} attempt ${attempt}/${MAX_RETRIES} re-establishing stream...`);
+              console.warn(`Stream ${partNumber} attempt ${attempt} retrying:`, chunkErr.message);
               if (attempt >= MAX_RETRIES) {
-                throw new Error(`Stream ${partNumber} failed after multiple attempts: ${chunkErr.message}`);
+                throw new Error(`Stream ${partNumber} failed after retries: ${chunkErr.message}`);
               }
-              // Exponential backoff
-              await new Promise((r) => setTimeout(r, Math.min(2500, 300 * Math.pow(1.5, attempt))));
+              await new Promise((r) => setTimeout(r, Math.min(2000, 250 * Math.pow(1.4, attempt))));
             }
           }
         };
@@ -249,16 +300,16 @@ export const UploadProvider = ({ children }) => {
           }
         };
 
-        // Run worker pool
+        // Run 8-socket worker pool concurrently
         const workers = Array.from({ length: CONCURRENCY }, () => worker());
         await Promise.all(workers);
 
         if (isAbortedRef.current) return;
 
-        setEtaText('Finalizing high-speed assembly...');
+        setEtaText('Finalizing cloud assembly (1-2s)...');
         setProgress(96);
 
-        // Commit large file on Backblaze B2
+        // Commit large file assembly on Backblaze B2
         await api.post('/videos/b2/finish-large-file', {
           fileId,
           partSha1Array,
@@ -266,7 +317,7 @@ export const UploadProvider = ({ children }) => {
       }
 
       setProgress(98);
-      setEtaText('Registering universal lifetime link...');
+      setEtaText('Activating permanent universal link...');
 
       // Save video record to MongoDB Atlas
       const saveRes = await api.post('/videos/save-cloud', {
@@ -297,7 +348,7 @@ export const UploadProvider = ({ children }) => {
       setEtaText(`Converted in ${conversionTimeStr}`);
       setState(UPLOAD_STATES.DONE);
       setResult(saveRes.data);
-      toast.success(`Video hosted in ${conversionTimeStr}! Universal link ready.`);
+      toast.success(`Video converted & hosted in ${conversionTimeStr}! Universal link ready.`);
     } catch (err) {
       if (!isAbortedRef.current) {
         console.error('Turbo upload error:', err);
