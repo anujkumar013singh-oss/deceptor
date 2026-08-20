@@ -20,6 +20,7 @@ import {
   ArrowLeft,
   Download,
   Check,
+  Film,
 } from 'lucide-react';
 import api from '../lib/api';
 import { formatDuration, formatFileSize, formatDate, copyToClipboard, getUniversalAddress } from '../lib/utils';
@@ -40,6 +41,7 @@ const PlaybackPage = () => {
   const [copied, setCopied] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [videoError, setVideoError] = useState(false);
 
   const handleDownload = () => {
     setDownloading(true);

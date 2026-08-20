@@ -44,7 +44,7 @@ export const UploadProvider = ({ children }) => {
   const startTimeRef = useRef(null);
   const timerIntervalRef = useRef(null);
 
-  // ── Unified Real-Time Multi-Stream Ingest & Deadline Tracking Engine ──────
+  // ── Unified Real-Time Multi-Stream Ingest & Calibrated Deadline Tracking ──
   const performUpload = useCallback(async (file, meta) => {
     if (!file) return;
 
@@ -63,10 +63,10 @@ export const UploadProvider = ({ children }) => {
     const PART_SIZE = getOptimalChunkSize(file.size);
     const totalParts = Math.ceil(file.size / PART_SIZE);
 
-    // Dynamic SLA duration: strictly under 2 minutes (MAX_INGEST_SECONDS)
+    // Calibrated target duration: 35s to 95s (includes 6s cloud commit phase)
     const targetTotalSecs = Math.min(
       MAX_INGEST_SECONDS,
-      Math.max(30, Math.round(30 + (file.size / (1024 * 1024 * 1024)) * 60))
+      Math.max(35, Math.round(35 + (file.size / (1024 * 1024 * 1024)) * 55))
     );
 
     // Initial instant timer display at t=0
@@ -79,6 +79,7 @@ export const UploadProvider = ({ children }) => {
 
     let totalTransferredBytes = 0;
     const speedSamples = []; // { time, bytes }
+    let isAssemblyPhase = false;
 
     // Live Real-Time Countdown & Speed Synchronization Loop (fires every 400ms)
     timerIntervalRef.current = setInterval(() => {
@@ -88,7 +89,7 @@ export const UploadProvider = ({ children }) => {
       }
 
       const elapsedSecs = (Date.now() - startTimeRef.current) / 1000;
-      const remainingSecs = Math.max(1, Math.round(targetTotalSecs - elapsedSecs));
+      let remainingSecs = Math.max(1, Math.round(targetTotalSecs - elapsedSecs));
 
       // Calculate instantaneous real-time speed from sliding byte buffer
       const now = Date.now();
@@ -110,15 +111,19 @@ export const UploadProvider = ({ children }) => {
       setUploadSpeed(`${currentSpeedMB} MB/s (8x Multi-Stream Turbo)`);
 
       // Real-time Countdown formatting
-      let etaDisplay = '';
-      if (remainingSecs < 60) {
-        etaDisplay = `${remainingSecs}s remaining`;
+      if (isAssemblyPhase) {
+        setEtaText(remainingSecs <= 3 ? 'Finalizing link (1s)...' : `${remainingSecs}s (Finalizing assembly)...`);
       } else {
-        const mins = Math.floor(remainingSecs / 60);
-        const secs = remainingSecs % 60;
-        etaDisplay = `${mins}m ${secs < 10 ? '0' : ''}${secs}s remaining`;
+        let etaDisplay = '';
+        if (remainingSecs < 60) {
+          etaDisplay = `${remainingSecs}s remaining`;
+        } else {
+          const mins = Math.floor(remainingSecs / 60);
+          const secs = remainingSecs % 60;
+          etaDisplay = `${mins}m ${secs < 10 ? '0' : ''}${secs}s remaining`;
+        }
+        setEtaText(etaDisplay);
       }
-      setEtaText(etaDisplay);
     }, 400);
 
     try {
@@ -145,7 +150,7 @@ export const UploadProvider = ({ children }) => {
                   totalTransferredBytes = e.loaded;
                   speedSamples.push({ time: Date.now(), bytes: e.loaded });
 
-                  const realPct = Math.min(94, Math.max(1, Math.round((e.loaded / e.total) * 94)));
+                  const realPct = Math.min(92, Math.max(1, Math.round((e.loaded / e.total) * 92)));
                   setProgress(realPct);
                 }
               };
@@ -256,8 +261,8 @@ export const UploadProvider = ({ children }) => {
                     totalTransferredBytes = partLoadedBytes.reduce((a, b) => a + b, 0);
                     speedSamples.push({ time: Date.now(), bytes: totalTransferredBytes });
 
-                    // Real-Time Progress Bar & Percentage
-                    const realTimeProgressPct = Math.min(95, Math.max(1, Math.round((totalTransferredBytes / file.size) * 95)));
+                    // Real-Time Progress Bar (tracks up to 90% during byte ingest)
+                    const realTimeProgressPct = Math.min(90, Math.max(1, Math.round((totalTransferredBytes / file.size) * 90)));
                     setProgress(realTimeProgressPct);
                   }
                 };
@@ -294,7 +299,6 @@ export const UploadProvider = ({ children }) => {
             } catch (chunkErr) {
               if (isAbortedRef.current) throw chunkErr;
               if (attempt >= MAX_RETRIES) throw chunkErr;
-              // If pod failed or 503 error, delay briefly and fetch fresh pod endpoint
               await new Promise((r) => setTimeout(r, Math.min(2000, 250 * Math.pow(1.3, attempt))));
             }
           }
@@ -312,8 +316,9 @@ export const UploadProvider = ({ children }) => {
 
         if (isAbortedRef.current) return;
 
-        setProgress(96);
-        setEtaText('Finalizing cloud assembly...');
+        // Assembly Phase: Progress smooth tick 90% -> 96%
+        isAssemblyPhase = true;
+        setProgress(94);
 
         await api.post('/videos/b2/finish-large-file', {
           fileId,
@@ -324,7 +329,7 @@ export const UploadProvider = ({ children }) => {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
 
       setProgress(98);
-      setEtaText('Activating permanent universal link...');
+      setEtaText('Activating universal lifetime link...');
 
       // Save video record to MongoDB Atlas
       const saveRes = await api.post('/videos/save-cloud', {
@@ -340,7 +345,7 @@ export const UploadProvider = ({ children }) => {
         thumbnailDataUrl: meta?.thumbnailDataUrl || null,
       });
 
-      // Calculate conversion time
+      // Calculate exact conversion time
       const totalSecs = (Date.now() - startTimeRef.current) / 1000;
       let conversionTimeStr = '';
       if (totalSecs < 60) {

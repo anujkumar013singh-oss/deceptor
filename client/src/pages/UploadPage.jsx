@@ -314,7 +314,7 @@ const UploadPage = () => {
             <input
               ref={fileInputRef}
               type="file"
-              accept="video/*"
+              accept="video/*,.mp4,.mkv,.mov,.webm,.avi,.mpeg,.mpg,.wmv,.vob,.ts,.flv,.m4v,.3gp"
               className="hidden"
               onChange={(e) => handleFileSelect(e.target.files[0])}
             />
@@ -332,7 +332,7 @@ const UploadPage = () => {
                     Drag & drop your video here
                   </h3>
                   <p className="text-sm text-slate-300 max-w-md mx-auto leading-relaxed">
-                    Supports MP4, WebM, MOV, and MKV up to 3 hours long. Preserves native bitrate and lossless audio worldwide.
+                    Supports all video formats (MP4, MKV, MOV, WebM, AVI, MPEG, MPG, WMV) up to 3 hours long. Preserves original bitrate and quality.
                   </p>
                 </div>
                 <button
