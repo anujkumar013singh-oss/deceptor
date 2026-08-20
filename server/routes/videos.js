@@ -154,17 +154,9 @@ router.post('/save-cloud', protect, async (req, res, next) => {
       }
     }
 
-    // Save thumbnail if client generated one
+    // Store client-generated thumbnail directly in MongoDB (serverless & cloud proof)
     if (thumbnailDataUrl && thumbnailDataUrl.startsWith('data:image')) {
-      try {
-        const base64Data = thumbnailDataUrl.replace(/^data:image\/\w+;base64,/, '');
-        const thumbFilename = `${shortLinkId}-thumb.jpg`;
-        const thumbPath = path.join(thumbDir, thumbFilename);
-        fs.writeFileSync(thumbPath, Buffer.from(base64Data, 'base64'));
-        thumbnailUrl = `/api/videos/thumb/${shortLinkId}`;
-      } catch (tErr) {
-        console.warn('Thumbnail save warning:', tErr.message);
-      }
+      thumbnailUrl = thumbnailDataUrl;
     }
 
     const video = await Video.create({

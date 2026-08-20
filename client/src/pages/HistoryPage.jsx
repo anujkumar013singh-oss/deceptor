@@ -28,6 +28,26 @@ const HistoryPage = () => {
   const [previewVideo, setPreviewVideo] = useState(null);
   const [deleteModal, setDeleteModal] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [brokenThumbs, setBrokenThumbs] = useState({});
+
+  const getThumbnailFallback = (video) => {
+    const title = (video.title || video.originalFilename || 'Video').replace(/\.[^/.]+$/, '');
+    const dur = video.durationSeconds ? formatDuration(video.durationSeconds) : '3HR CAPACITY';
+    return (
+      <div className="w-full h-full bg-gradient-to-tr from-slate-950 via-[#0a1226] to-slate-900 flex flex-col items-center justify-center p-4 relative overflow-hidden group-hover/thumb:scale-105 transition-transform duration-500">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(56,189,248,0.18),transparent_70%)]" />
+        <div className="w-11 h-11 rounded-2xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-300 mb-2 shadow-[0_0_20px_rgba(56,189,248,0.3)]">
+          <Film className="w-5 h-5" />
+        </div>
+        <span className="text-xs font-bold text-white text-center line-clamp-1 max-w-[90%] relative z-10 font-display">
+          {title}
+        </span>
+        <span className="text-[10px] font-bold text-cyan-400 mt-1 relative z-10 uppercase tracking-wider">
+          {dur} • READY
+        </span>
+      </div>
+    );
+  };
 
   const fetchVideos = async () => {
     try {
@@ -152,16 +172,15 @@ const HistoryPage = () => {
                     onClick={() => setPreviewVideo(video)}
                     className="relative aspect-video rounded-2xl overflow-hidden bg-black cursor-pointer group/thumb border border-white/10 mb-4"
                   >
-                    {video.thumbnailUrl ? (
+                    {video.thumbnailUrl && !brokenThumbs[video._id] ? (
                       <img
                         src={video.thumbnailUrl}
                         alt={video.title || video.originalFilename}
+                        onError={() => setBrokenThumbs((prev) => ({ ...prev, [video._id]: true }))}
                         className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform duration-500"
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-slate-900 text-slate-600">
-                        <Film className="w-10 h-10 text-cyan-400/60" />
-                      </div>
+                      getThumbnailFallback(video)
                     )}
 
                     {/* Play Overlay Button */}
