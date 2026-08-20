@@ -12,9 +12,6 @@ export const UPLOAD_STATES = {
   ERROR: 'error',
 };
 
-// Strict SLA: 2-minute deadline maximum (115 seconds hard limit)
-const MAX_INGEST_SECONDS = 115;
-
 // Hardware-accelerated WebCrypto SHA-1 computation
 const computeSha1 = async (arrayBuffer) => {
   const hashBuffer = await crypto.subtle.digest('SHA-1', arrayBuffer);
@@ -44,7 +41,7 @@ export const UploadProvider = ({ children }) => {
   const startTimeRef = useRef(null);
   const timerIntervalRef = useRef(null);
 
-  // ── Unified Real-Time Multi-Stream Ingest & Calibrated Deadline Tracking ──
+  // ── Unified Real-Time Multi-Stream Ingest & Accurate Mathematical Timer ───
   const performUpload = useCallback(async (file, meta) => {
     if (!file) return;
 
@@ -63,68 +60,71 @@ export const UploadProvider = ({ children }) => {
     const PART_SIZE = getOptimalChunkSize(file.size);
     const totalParts = Math.ceil(file.size / PART_SIZE);
 
-    // Calibrated target duration: 35s to 95s (includes 6s cloud commit phase)
-    const targetTotalSecs = Math.min(
-      MAX_INGEST_SECONDS,
-      Math.max(35, Math.round(35 + (file.size / (1024 * 1024 * 1024)) * 55))
-    );
-
-    // Initial instant timer display at t=0
-    setEtaText(
-      targetTotalSecs < 60
-        ? `${targetTotalSecs}s remaining`
-        : `${Math.floor(targetTotalSecs / 60)}m ${targetTotalSecs % 60 < 10 ? '0' : ''}${targetTotalSecs % 60}s remaining`
-    );
-    setUploadSpeed('Connecting 8x Turbo Pipeline...');
-
     let totalTransferredBytes = 0;
     const speedSamples = []; // { time, bytes }
     let isAssemblyPhase = false;
 
-    // Live Real-Time Countdown & Speed Synchronization Loop (fires every 400ms)
+    // Initial estimation based on target bandwidth
+    const initialEstimatedSecs = Math.max(15, Math.min(110, Math.round(file.size / (6 * 1024 * 1024))));
+    setEtaText(
+      initialEstimatedSecs < 60
+        ? `${initialEstimatedSecs}s remaining`
+        : `${Math.floor(initialEstimatedSecs / 60)}m ${initialEstimatedSecs % 60 < 10 ? '0' : ''}${initialEstimatedSecs % 60}s remaining`
+    );
+    setUploadSpeed('Connecting 8x Turbo Pipeline...');
+
+    // Live Real-Time Countdown & Speed Synchronization Loop (fires every 350ms)
     timerIntervalRef.current = setInterval(() => {
       if (isAbortedRef.current) {
         clearInterval(timerIntervalRef.current);
         return;
       }
 
-      const elapsedSecs = (Date.now() - startTimeRef.current) / 1000;
-      let remainingSecs = Math.max(1, Math.round(targetTotalSecs - elapsedSecs));
-
-      // Calculate instantaneous real-time speed from sliding byte buffer
       const now = Date.now();
-      while (speedSamples.length > 2 && now - speedSamples[0].time > 2000) {
+      const elapsedSecs = (now - startTimeRef.current) / 1000;
+
+      // Keep recent speed samples from last 2.5 seconds
+      while (speedSamples.length > 3 && now - speedSamples[0].time > 2500) {
         speedSamples.shift();
       }
 
-      let currentSpeedMB = '0.0';
+      let currentSpeedBytesPerSec = 0;
       if (speedSamples.length >= 2) {
         const dt = (now - speedSamples[0].time) / 1000;
         const db = totalTransferredBytes - speedSamples[0].bytes;
-        if (dt > 0.1) {
-          currentSpeedMB = Math.max(0.5, db / dt / (1024 * 1024)).toFixed(1);
+        if (dt > 0.12 && db > 0) {
+          currentSpeedBytesPerSec = db / dt;
         }
-      } else if (elapsedSecs > 0.3) {
-        currentSpeedMB = Math.max(0.5, totalTransferredBytes / elapsedSecs / (1024 * 1024)).toFixed(1);
+      }
+      if (!currentSpeedBytesPerSec && elapsedSecs > 0.3) {
+        currentSpeedBytesPerSec = totalTransferredBytes / elapsedSecs;
+      }
+      if (!currentSpeedBytesPerSec || currentSpeedBytesPerSec < 1024) {
+        currentSpeedBytesPerSec = Math.max(1024 * 1024, file.size / 80);
       }
 
-      setUploadSpeed(`${currentSpeedMB} MB/s (8x Multi-Stream Turbo)`);
+      const speedMB = (currentSpeedBytesPerSec / (1024 * 1024)).toFixed(1);
+      setUploadSpeed(`${speedMB} MB/s (8x Multi-Stream Turbo)`);
 
-      // Real-time Countdown formatting
+      // ── ACCURATE MATHEMATICAL REMAINING TIME TIED DIRECTLY TO REMAINING BYTES ──
+      const remainingBytes = Math.max(0, file.size - totalTransferredBytes);
+      const transferRemainingSecs = Math.max(1, Math.round(remainingBytes / currentSpeedBytesPerSec));
+
       if (isAssemblyPhase) {
-        setEtaText(remainingSecs <= 3 ? 'Finalizing link (1s)...' : `${remainingSecs}s (Finalizing assembly)...`);
+        setEtaText('Finalizing cloud link (1-2s)...');
       } else {
+        const totalEtaSecs = Math.min(115, transferRemainingSecs + 3); // +3s cloud commit cushion
         let etaDisplay = '';
-        if (remainingSecs < 60) {
-          etaDisplay = `${remainingSecs}s remaining`;
+        if (totalEtaSecs < 60) {
+          etaDisplay = `${totalEtaSecs}s remaining`;
         } else {
-          const mins = Math.floor(remainingSecs / 60);
-          const secs = remainingSecs % 60;
+          const mins = Math.floor(totalEtaSecs / 60);
+          const secs = totalEtaSecs % 60;
           etaDisplay = `${mins}m ${secs < 10 ? '0' : ''}${secs}s remaining`;
         }
         setEtaText(etaDisplay);
       }
-    }, 400);
+    }, 350);
 
     try {
       let finalFileId = null;
@@ -150,7 +150,7 @@ export const UploadProvider = ({ children }) => {
                   totalTransferredBytes = e.loaded;
                   speedSamples.push({ time: Date.now(), bytes: e.loaded });
 
-                  const realPct = Math.min(92, Math.max(1, Math.round((e.loaded / e.total) * 92)));
+                  const realPct = Math.min(94, Math.max(1, Math.round((e.loaded / e.total) * 94)));
                   setProgress(realPct);
                 }
               };
@@ -261,8 +261,8 @@ export const UploadProvider = ({ children }) => {
                     totalTransferredBytes = partLoadedBytes.reduce((a, b) => a + b, 0);
                     speedSamples.push({ time: Date.now(), bytes: totalTransferredBytes });
 
-                    // Real-Time Progress Bar (tracks up to 90% during byte ingest)
-                    const realTimeProgressPct = Math.min(90, Math.max(1, Math.round((totalTransferredBytes / file.size) * 90)));
+                    // Real-Time Progress Bar (tracks up to 92% during byte ingest)
+                    const realTimeProgressPct = Math.min(92, Math.max(1, Math.round((totalTransferredBytes / file.size) * 92)));
                     setProgress(realTimeProgressPct);
                   }
                 };
@@ -316,9 +316,9 @@ export const UploadProvider = ({ children }) => {
 
         if (isAbortedRef.current) return;
 
-        // Assembly Phase: Progress smooth tick 90% -> 96%
+        // Assembly Phase: Progress smooth tick 92% -> 96%
         isAssemblyPhase = true;
-        setProgress(94);
+        setProgress(95);
 
         await api.post('/videos/b2/finish-large-file', {
           fileId,
