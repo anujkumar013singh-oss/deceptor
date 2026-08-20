@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useRef, useCallback } from 'react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
+import { isNativeBrowserFormat, convertToUniversalMP4 } from '../lib/videoConverter';
 
 const UploadContext = createContext(null);
 
@@ -41,7 +42,7 @@ export const UploadProvider = ({ children }) => {
   const startTimeRef = useRef(null);
   const timerIntervalRef = useRef(null);
 
-  // ── Unified Real-Time Multi-Stream Ingest & Accurate Mathematical Timer ───
+  // ── Unified Universal MP4 Conversion, Ingest & Real-Time Sync Engine ──────
   const performUpload = useCallback(async (file, meta) => {
     if (!file) return;
 
@@ -54,18 +55,32 @@ export const UploadProvider = ({ children }) => {
     setError('');
     startTimeRef.current = Date.now();
 
-    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    // 1. Format Detection & In-Browser Universal MP4 Transcoding Pipeline
+    let fileToUpload = file;
+    if (!isNativeBrowserFormat(file.name, file.type)) {
+      const origExt = file.name.split('.').pop()?.toUpperCase() || 'RAW';
+      setEtaText(`Converting ${origExt} to Universal MP4 (H.264)...`);
+      try {
+        fileToUpload = await convertToUniversalMP4(file, (pct) => {
+          setProgress(Math.min(20, Math.round(pct * 0.2)));
+        });
+      } catch (convErr) {
+        console.warn('WASM Transcode notice:', convErr.message);
+      }
+    }
+
+    const sanitizedName = fileToUpload.name.replace(/[^a-zA-Z0-9.-]/g, '_');
     const cloudFileName = `videos/${Date.now()}_${sanitizedName}`;
 
-    const PART_SIZE = getOptimalChunkSize(file.size);
-    const totalParts = Math.ceil(file.size / PART_SIZE);
+    const PART_SIZE = getOptimalChunkSize(fileToUpload.size);
+    const totalParts = Math.ceil(fileToUpload.size / PART_SIZE);
 
     let totalTransferredBytes = 0;
     const speedSamples = []; // { time, bytes }
     let isAssemblyPhase = false;
 
     // Initial estimation based on target bandwidth
-    const initialEstimatedSecs = Math.max(15, Math.min(110, Math.round(file.size / (6 * 1024 * 1024))));
+    const initialEstimatedSecs = Math.max(15, Math.min(110, Math.round(fileToUpload.size / (6 * 1024 * 1024))));
     setEtaText(
       initialEstimatedSecs < 60
         ? `${initialEstimatedSecs}s remaining`
@@ -100,20 +115,20 @@ export const UploadProvider = ({ children }) => {
         currentSpeedBytesPerSec = totalTransferredBytes / elapsedSecs;
       }
       if (!currentSpeedBytesPerSec || currentSpeedBytesPerSec < 1024) {
-        currentSpeedBytesPerSec = Math.max(1024 * 1024, file.size / 80);
+        currentSpeedBytesPerSec = Math.max(1024 * 1024, fileToUpload.size / 80);
       }
 
       const speedMB = (currentSpeedBytesPerSec / (1024 * 1024)).toFixed(1);
       setUploadSpeed(`${speedMB} MB/s (8x Multi-Stream Turbo)`);
 
-      // ── ACCURATE MATHEMATICAL REMAINING TIME TIED DIRECTLY TO REMAINING BYTES ──
-      const remainingBytes = Math.max(0, file.size - totalTransferredBytes);
+      // Real-Time Mathematically Linked Countdown
+      const remainingBytes = Math.max(0, fileToUpload.size - totalTransferredBytes);
       const transferRemainingSecs = Math.max(1, Math.round(remainingBytes / currentSpeedBytesPerSec));
 
       if (isAssemblyPhase) {
-        setEtaText('Finalizing cloud link (1-2s)...');
+        setEtaText('Finalizing universal link (1-2s)...');
       } else {
-        const totalEtaSecs = Math.min(115, transferRemainingSecs + 3); // +3s cloud commit cushion
+        const totalEtaSecs = Math.min(115, transferRemainingSecs + 3);
         let etaDisplay = '';
         if (totalEtaSecs < 60) {
           etaDisplay = `${totalEtaSecs}s remaining`;
@@ -131,7 +146,7 @@ export const UploadProvider = ({ children }) => {
       let finalFileName = cloudFileName;
 
       // ── FAST PATH 1: Small files (< 16MB) ─────────────────────────────────
-      if (file.size < 16 * 1024 * 1024 || totalParts < 2) {
+      if (fileToUpload.size < 16 * 1024 * 1024 || totalParts < 2) {
         let singleRes = null;
         let attempts = 0;
 
@@ -168,9 +183,9 @@ export const UploadProvider = ({ children }) => {
               xhr.open('POST', uploadUrl, true);
               xhr.setRequestHeader('Authorization', authorizationToken);
               xhr.setRequestHeader('X-Bz-File-Name', encodeURIComponent(cloudFileName));
-              xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+              xhr.setRequestHeader('Content-Type', fileToUpload.type || 'video/mp4');
               xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
-              xhr.send(file);
+              xhr.send(fileToUpload);
             });
           } catch (err) {
             if (attempts >= 4) throw err;
@@ -184,7 +199,7 @@ export const UploadProvider = ({ children }) => {
         // ── FAST PATH 2: 8x Parallel Multi-Socket Real-Time Ingest ─────────
         const startRes = await api.post('/videos/b2/start-large-file', {
           fileName: cloudFileName,
-          contentType: file.type || 'video/mp4',
+          contentType: fileToUpload.type || 'video/mp4',
         });
 
         const fileId = startRes.data.fileId;
@@ -234,8 +249,8 @@ export const UploadProvider = ({ children }) => {
         const uploadChunkWithRetry = async (index) => {
           const partNumber = index + 1;
           const startByte = index * PART_SIZE;
-          const endByte = Math.min(file.size, startByte + PART_SIZE);
-          const chunkBlob = file.slice(startByte, endByte);
+          const endByte = Math.min(fileToUpload.size, startByte + PART_SIZE);
+          const chunkBlob = fileToUpload.slice(startByte, endByte);
 
           const arrayBuffer = await chunkBlob.arrayBuffer();
           const sha1 = await computeSha1(arrayBuffer);
@@ -262,7 +277,7 @@ export const UploadProvider = ({ children }) => {
                     speedSamples.push({ time: Date.now(), bytes: totalTransferredBytes });
 
                     // Real-Time Progress Bar (tracks up to 92% during byte ingest)
-                    const realTimeProgressPct = Math.min(92, Math.max(1, Math.round((totalTransferredBytes / file.size) * 92)));
+                    const realTimeProgressPct = Math.min(92, Math.max(1, Math.round((totalTransferredBytes / fileToUpload.size) * 92)));
                     setProgress(realTimeProgressPct);
                   }
                 };
@@ -338,10 +353,10 @@ export const UploadProvider = ({ children }) => {
         duration: meta?.duration || 0,
         width: meta?.width || 1920,
         height: meta?.height || 1080,
-        bytes: file.size,
-        original_filename: file.name,
-        format: file.name.split('.').pop() || 'mp4',
-        title: file.name.replace(/\.[^/.]+$/, ''),
+        bytes: fileToUpload.size,
+        original_filename: fileToUpload.name,
+        format: fileToUpload.name.split('.').pop() || 'mp4',
+        title: fileToUpload.name.replace(/\.[^/.]+$/, ''),
         thumbnailDataUrl: meta?.thumbnailDataUrl || null,
       });
 
