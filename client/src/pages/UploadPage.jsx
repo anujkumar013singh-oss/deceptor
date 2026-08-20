@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Upload,
@@ -15,6 +15,8 @@ import {
   HardDrive,
   Clock,
   ShieldCheck,
+  Timer,
+  Sparkles,
 } from 'lucide-react';
 import api from '../lib/api';
 import {
@@ -36,6 +38,12 @@ const UPLOAD_STATES = {
   ERROR: 'error',
 };
 
+const formatElapsedTimer = (secs) => {
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m}m ${s < 10 ? '0' : ''}${s}s`;
+};
+
 const UploadPage = () => {
   const [state, setState] = useState(UPLOAD_STATES.IDLE);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -49,10 +57,31 @@ const UploadPage = () => {
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploadSpeed, setUploadSpeed] = useState('');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [finalConvertedTime, setFinalConvertedTime] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const fileInputRef = useRef(null);
   const xhrRef = useRef(null);
+  const timerRef = useRef(null);
+
+  // ── Live Real-Time Elapsed Conversion Timer ──────────────────────────────
+  useEffect(() => {
+    if (state === UPLOAD_STATES.UPLOADING) {
+      setElapsedSeconds(0);
+      const startT = Date.now();
+      timerRef.current = setInterval(() => {
+        const secs = (Date.now() - startT) / 1000;
+        setElapsedSeconds(secs);
+      }, 200);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [state]);
 
   // ── High-Tech Fallback Thumbnail Generator ────────────────────────────────
   const generateFallbackPoster = (file, duration, width, height) => {
@@ -251,10 +280,16 @@ const UploadPage = () => {
   };
   const onDragLeave = () => setDragging(false);
 
-  // ── High-Speed Turbo Ingest Engine (Sub-90-Second Fast Pipeline) ─────────
+  // ── High-Speed Turbo Ingest Engine (Bypasses 100MB Transform Limit via Raw Pipeline) ───
   const uploadInChunks = async (file, signData) => {
     const { timestamp, signature, api_key, cloud_name, folder } = signData;
     const startTime = Date.now();
+
+    // For files > 90MB (or up to 10GB / 3-hour long videos), use 'raw' or 'auto' endpoint to bypass 100MB transform cap
+    const isLargeFile = file.size > 90 * 1024 * 1024;
+    const uploadEndpoint = isLargeFile
+      ? `https://api.cloudinary.com/v1_1/${cloud_name}/raw/upload`
+      : `https://api.cloudinary.com/v1_1/${cloud_name}/video/upload`;
 
     // Fast Path 1: For files <= 60MB, direct single-pipe streaming (completes in 3-10s)
     if (file.size <= 60 * 1024 * 1024) {
@@ -300,7 +335,7 @@ const UploadPage = () => {
 
         xhr.onerror = () => reject(new Error('Network interrupted during turbo transfer.'));
 
-        xhr.open('POST', `https://api.cloudinary.com/v1_1/${cloud_name}/video/upload`);
+        xhr.open('POST', uploadEndpoint);
         xhr.send(formData);
       });
     }
@@ -360,7 +395,7 @@ const UploadPage = () => {
 
         xhr.onerror = () => reject(new Error('Network error during chunked video transfer.'));
 
-        xhr.open('POST', `https://api.cloudinary.com/v1_1/${cloud_name}/video/upload`);
+        xhr.open('POST', uploadEndpoint);
         xhr.setRequestHeader('X-Unique-Upload-Id', uniqueUploadId);
         xhr.setRequestHeader('Content-Range', `bytes ${start}-${end - 1}/${file.size}`);
         xhr.send(chunkFormData);
@@ -382,12 +417,14 @@ const UploadPage = () => {
     setProgress(0);
     setError('');
 
+    const startConversionTime = Date.now();
+
     try {
       // 1. Fetch Cloudinary signature from backend
       const signRes = await api.get('/videos/sign-upload');
       const signData = signRes.data;
 
-      // 2. Stream video using Chunked Ingest Engine (bypasses all payload limits)
+      // 2. Stream video using Chunked / Raw Ingest Engine (supports up to 10GB & 3-hour videos)
       const cData = await uploadInChunks(selectedFile, signData);
 
       if (!cData?.secure_url) {
@@ -395,6 +432,11 @@ const UploadPage = () => {
       }
 
       setProgress(95);
+
+      // Calculate final conversion time
+      const totalSecs = (Date.now() - startConversionTime) / 1000;
+      const formattedTotal = formatElapsedTimer(totalSecs);
+      setFinalConvertedTime(formattedTotal);
 
       // 3. Save metadata permanently into MongoDB Atlas
       const saveRes = await api.post('/videos/save-cloud', {
@@ -412,7 +454,7 @@ const UploadPage = () => {
       setProgress(100);
       setState(UPLOAD_STATES.DONE);
       setResult(saveRes.data);
-      toast.success('Universal link active & ready!');
+      toast.success(`Video hosted in ${formattedTotal}! Universal link ready.`);
     } catch (err) {
       console.warn('Upload error:', err.message);
       setState(UPLOAD_STATES.ERROR);
@@ -437,6 +479,8 @@ const UploadPage = () => {
     setFileObjectUrl('');
     setVideoMeta({ duration: 0, width: 0, height: 0, thumbnailDataUrl: '' });
     setProgress(0);
+    setElapsedSeconds(0);
+    setFinalConvertedTime('');
     setResult(null);
     setError('');
   };
@@ -458,10 +502,10 @@ const UploadPage = () => {
         <div className="flex items-center gap-3">
           <div className="px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-400/30 text-emerald-400 text-xs font-bold flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5" />
-            <span>3-Hour Capacity</span>
+            <span>3-Hour / 10GB Capacity</span>
           </div>
           <div className="px-3.5 py-1.5 rounded-full bg-blue-500/10 border border-cyan-400/30 text-cyan-300 text-xs font-bold">
-            Lossless 4K Ready
+            Sub-90s Fast Lane
           </div>
         </div>
       </div>
@@ -589,25 +633,35 @@ const UploadPage = () => {
                   </div>
                 )}
 
-                {/* Progress Bar Display */}
+                {/* Progress Bar Display with Live Conversion Timer */}
                 {state === UPLOAD_STATES.UPLOADING && (
-                  <div className="space-y-3 p-6 rounded-2xl bg-slate-950/90 border border-cyan-500/40 shadow-[0_0_30px_rgba(56,189,248,0.2)]">
-                    <div className="flex items-center justify-between text-xs font-bold">
+                  <div className="space-y-4 p-6 rounded-2xl bg-slate-950/90 border border-cyan-500/40 shadow-[0_0_30px_rgba(56,189,248,0.2)]">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-bold">
                       <span className="text-cyan-300 flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
                         Streaming video chunks to global cloud storage...
                       </span>
-                      <span className="text-white text-sm">{progress}%</span>
+
+                      {/* Live Ingest Stopwatch */}
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/20 border border-cyan-400/40 text-cyan-300 font-bold">
+                          <Timer className="w-3.5 h-3.5 animate-spin" />
+                          <span>Elapsed: {formatElapsedTimer(elapsedSeconds)}</span>
+                        </div>
+                        <span className="text-white text-base font-black">{progress}%</span>
+                      </div>
                     </div>
+
                     <div className="h-3.5 w-full bg-slate-900 rounded-full overflow-hidden border border-white/10 p-0.5">
                       <div
                         className="h-full bg-gradient-to-r from-blue-600 via-cyan-400 to-indigo-500 rounded-full transition-all duration-200"
                         style={{ width: `${progress}%` }}
                       />
                     </div>
+
                     <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-                      <span>Transfer Rate: {uploadSpeed || 'Streaming active'}</span>
-                      <span>Do not close this window</span>
+                      <span>Speed: {uploadSpeed || 'Active fast transfer'}</span>
+                      <span>Target: Sub-90s instant pipeline</span>
                     </div>
                   </div>
                 )}
@@ -636,10 +690,18 @@ const UploadPage = () => {
               <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 border border-emerald-400/50 flex items-center justify-center text-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.3)]">
                 <CheckCircle className="w-8 h-8" />
               </div>
-              <div>
-                <h2 className="font-display text-2xl sm:text-3xl font-black text-white">
-                  Universal Link Generated!
-                </h2>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
+                  <h2 className="font-display text-2xl sm:text-3xl font-black text-white">
+                    Universal Link Generated!
+                  </h2>
+                  {finalConvertedTime && (
+                    <span className="px-3 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-xs font-bold flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Converted in {finalConvertedTime}</span>
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm text-slate-300 font-medium">
                   Your video is hosted and permanent. Anyone with this link can stream it in original quality with zero ads.
                 </p>
@@ -724,10 +786,10 @@ const UploadPage = () => {
                   </div>
                 </div>
                 <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 text-center">
-                  <div className="text-xs text-slate-400 font-medium">Status</div>
-                  <div className="text-sm font-bold text-emerald-400 mt-1 uppercase flex items-center justify-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    Permanent Active
+                  <div className="text-xs text-slate-400 font-medium">Speed Telemetry</div>
+                  <div className="text-sm font-bold text-cyan-300 mt-1 uppercase flex items-center justify-center gap-1.5">
+                    <Timer className="w-3.5 h-3.5 text-cyan-400" />
+                    {finalConvertedTime ? `Done in ${finalConvertedTime}` : 'Permanent Active'}
                   </div>
                 </div>
               </div>
