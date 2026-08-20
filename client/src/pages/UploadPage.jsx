@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Upload,
@@ -18,7 +18,6 @@ import {
   Timer,
   Sparkles,
 } from 'lucide-react';
-import api from '../lib/api';
 import {
   formatDuration,
   formatFileSize,
@@ -26,62 +25,29 @@ import {
   getUniversalAddress,
 } from '../lib/utils';
 import toast from 'react-hot-toast';
+import { useUpload } from '../context/UploadContext';
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB limit
 const MAX_DURATION_SECONDS = 3 * 60 * 60; // 3 Hours Max
 
-const UPLOAD_STATES = {
-  IDLE: 'idle',
-  PREPARING: 'preparing',
-  UPLOADING: 'uploading',
-  DONE: 'done',
-  ERROR: 'error',
-};
-
-const formatElapsedTimer = (secs) => {
-  const m = Math.floor(secs / 60);
-  const s = Math.floor(secs % 60);
-  return `${m}m ${s < 10 ? '0' : ''}${s}s`;
-};
-
 const UploadPage = () => {
-  const [state, setState] = useState(UPLOAD_STATES.IDLE);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [fileObjectUrl, setFileObjectUrl] = useState('');
-  const [videoMeta, setVideoMeta] = useState({
-    duration: 0,
-    width: 0,
-    height: 0,
-    thumbnailDataUrl: '',
-  });
+  const {
+    state, setState,
+    selectedFile, setSelectedFile,
+    videoMeta, setVideoMeta,
+    progress,
+    uploadSpeed,
+    etaText,
+    result,
+    error, setError,
+    performUpload,
+    reset,
+    UPLOAD_STATES,
+  } = useUpload();
+
   const [dragging, setDragging] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [uploadSpeed, setUploadSpeed] = useState('');
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [finalConvertedTime, setFinalConvertedTime] = useState('');
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState('');
+  const [fileObjectUrl, setFileObjectUrl] = useState('');
   const fileInputRef = useRef(null);
-  const xhrRef = useRef(null);
-  const timerRef = useRef(null);
-
-  // ── Live Real-Time Elapsed Conversion Timer ──────────────────────────────
-  useEffect(() => {
-    if (state === UPLOAD_STATES.UPLOADING) {
-      setElapsedSeconds(0);
-      const startT = Date.now();
-      timerRef.current = setInterval(() => {
-        const secs = (Date.now() - startT) / 1000;
-        setElapsedSeconds(secs);
-      }, 200);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [state]);
 
   // ── High-Tech Fallback Thumbnail Generator ────────────────────────────────
   const generateFallbackPoster = (file, duration, width, height) => {
@@ -141,7 +107,7 @@ const UploadPage = () => {
       ctx.closePath();
       ctx.fill();
 
-      // Video Title Text (Bricolage / Sans Style)
+      // Video Title Text
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 36px sans-serif';
       ctx.textAlign = 'center';
@@ -280,187 +246,10 @@ const UploadPage = () => {
   };
   const onDragLeave = () => setDragging(false);
 
-  // ── High-Speed Turbo Ingest Engine (Bypasses 100MB Transform Limit via Raw Pipeline) ───
-  const uploadInChunks = async (file, signData) => {
-    const { timestamp, signature, api_key, cloud_name, folder } = signData;
-    const startTime = Date.now();
-
-    // For files > 90MB (or up to 10GB / 3-hour long videos), use 'raw' or 'auto' endpoint to bypass 100MB transform cap
-    const isLargeFile = file.size > 90 * 1024 * 1024;
-    const uploadEndpoint = isLargeFile
-      ? `https://api.cloudinary.com/v1_1/${cloud_name}/raw/upload`
-      : `https://api.cloudinary.com/v1_1/${cloud_name}/video/upload`;
-
-    // Fast Path 1: For files <= 60MB, direct single-pipe streaming (completes in 3-10s)
-    if (file.size <= 60 * 1024 * 1024) {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('api_key', api_key);
-      formData.append('timestamp', timestamp);
-      formData.append('signature', signature);
-      formData.append('folder', folder);
-
-      return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhrRef.current = xhr;
-
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            const pct = Math.min(94, Math.round((e.loaded / e.total) * 94));
-            setProgress(pct);
-
-            const elapsedSec = (Date.now() - startTime) / 1000;
-            if (elapsedSec > 0.3) {
-              const speedMBps = (e.loaded / (1024 * 1024) / elapsedSec).toFixed(1);
-              setUploadSpeed(`${speedMBps} MB/s (Turbo Stream)`);
-            }
-          }
-        };
-
-        xhr.onload = () => {
-          if (xhr.status === 200 || xhr.status === 201) {
-            try {
-              resolve(JSON.parse(xhr.responseText));
-            } catch (_) {
-              resolve({});
-            }
-          } else {
-            let errText = 'Upload stream error';
-            try {
-              errText = JSON.parse(xhr.responseText)?.error?.message || errText;
-            } catch (_) {}
-            reject(new Error(errText));
-          }
-        };
-
-        xhr.onerror = () => reject(new Error('Network interrupted during turbo transfer.'));
-
-        xhr.open('POST', uploadEndpoint);
-        xhr.send(formData);
-      });
-    }
-
-    // Fast Path 2: Large / 3-Hour Multi-Gigabyte Video Chunked Pipeline (25MB optimized chunks)
-    const chunkSize = 25 * 1024 * 1024; // 25MB chunks
-    const totalChunks = Math.ceil(file.size / chunkSize);
-    const uniqueUploadId = 'cld_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10);
-
-    let finalResponse = null;
-
-    for (let i = 0; i < totalChunks; i++) {
-      const start = i * chunkSize;
-      const end = Math.min(file.size, start + chunkSize);
-      const chunk = file.slice(start, end);
-
-      const chunkFormData = new FormData();
-      chunkFormData.append('file', chunk);
-      chunkFormData.append('api_key', api_key);
-      chunkFormData.append('timestamp', timestamp);
-      chunkFormData.append('signature', signature);
-      chunkFormData.append('folder', folder);
-
-      const res = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhrRef.current = xhr;
-
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            const overallLoaded = start + e.loaded;
-            const pct = Math.min(94, Math.round((overallLoaded / file.size) * 94));
-            setProgress(pct);
-
-            const elapsedSec = (Date.now() - startTime) / 1000;
-            if (elapsedSec > 0.3) {
-              const speedMBps = (overallLoaded / (1024 * 1024) / elapsedSec).toFixed(1);
-              setUploadSpeed(`${speedMBps} MB/s • Chunk ${i + 1}/${totalChunks}`);
-            }
-          }
-        };
-
-        xhr.onload = () => {
-          if (xhr.status === 200 || xhr.status === 201) {
-            try {
-              resolve(JSON.parse(xhr.responseText));
-            } catch (_) {
-              resolve({});
-            }
-          } else {
-            let errText = 'Chunk transfer error';
-            try {
-              errText = JSON.parse(xhr.responseText)?.error?.message || errText;
-            } catch (_) {}
-            reject(new Error(errText));
-          }
-        };
-
-        xhr.onerror = () => reject(new Error('Network error during chunked video transfer.'));
-
-        xhr.open('POST', uploadEndpoint);
-        xhr.setRequestHeader('X-Unique-Upload-Id', uniqueUploadId);
-        xhr.setRequestHeader('Content-Range', `bytes ${start}-${end - 1}/${file.size}`);
-        xhr.send(chunkFormData);
-      });
-
-      if (res && res.secure_url) {
-        finalResponse = res;
-      }
-    }
-
-    return finalResponse;
-  };
-
-  // ── Upload Execution ────────────────────────────────────────────────────
-  const handleUpload = async () => {
+  // ── Upload Execution — delegates to the persistent UploadContext engine ──
+  const handleUpload = () => {
     if (!selectedFile) return;
-
-    setState(UPLOAD_STATES.UPLOADING);
-    setProgress(0);
-    setError('');
-
-    const startConversionTime = Date.now();
-
-    try {
-      // 1. Fetch Cloudinary signature from backend
-      const signRes = await api.get('/videos/sign-upload');
-      const signData = signRes.data;
-
-      // 2. Stream video using Chunked / Raw Ingest Engine (supports up to 10GB & 3-hour videos)
-      const cData = await uploadInChunks(selectedFile, signData);
-
-      if (!cData?.secure_url) {
-        throw new Error('Cloud storage did not return secure streaming URL.');
-      }
-
-      setProgress(95);
-
-      // Calculate final conversion time
-      const totalSecs = (Date.now() - startConversionTime) / 1000;
-      const formattedTotal = formatElapsedTimer(totalSecs);
-      setFinalConvertedTime(formattedTotal);
-
-      // 3. Save metadata permanently into MongoDB Atlas
-      const saveRes = await api.post('/videos/save-cloud', {
-        secure_url: cData.secure_url,
-        public_id: cData.public_id,
-        duration: cData.duration || videoMeta.duration,
-        width: cData.width || videoMeta.width,
-        height: cData.height || videoMeta.height,
-        bytes: cData.bytes || selectedFile.size,
-        original_filename: selectedFile.name,
-        format: cData.format || selectedFile.name.split('.').pop(),
-        title: selectedFile.name.replace(/\.[^/.]+$/, ''),
-      });
-
-      setProgress(100);
-      setState(UPLOAD_STATES.DONE);
-      setResult(saveRes.data);
-      toast.success(`Video hosted in ${formattedTotal}! Universal link ready.`);
-    } catch (err) {
-      console.warn('Upload error:', err.message);
-      setState(UPLOAD_STATES.ERROR);
-      setError(err?.message || 'Transfer failed. Please check network connection.');
-      toast.error(err?.message || 'Upload failed');
-    }
+    performUpload(selectedFile, videoMeta);
   };
 
   const videoData = result?.video || result?.data?.video || (result?.shortLinkId ? result : null);
@@ -474,15 +263,8 @@ const UploadPage = () => {
   };
 
   const handleReset = () => {
-    setState(UPLOAD_STATES.IDLE);
-    setSelectedFile(null);
+    reset();
     setFileObjectUrl('');
-    setVideoMeta({ duration: 0, width: 0, height: 0, thumbnailDataUrl: '' });
-    setProgress(0);
-    setElapsedSeconds(0);
-    setFinalConvertedTime('');
-    setResult(null);
-    setError('');
   };
 
   return (
@@ -633,7 +415,7 @@ const UploadPage = () => {
                   </div>
                 )}
 
-                {/* Progress Bar Display with Live Conversion Timer */}
+                {/* Progress Bar with ETA Timer */}
                 {state === UPLOAD_STATES.UPLOADING && (
                   <div className="space-y-4 p-6 rounded-2xl bg-slate-950/90 border border-cyan-500/40 shadow-[0_0_30px_rgba(56,189,248,0.2)]">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-bold">
@@ -642,11 +424,11 @@ const UploadPage = () => {
                         Streaming video chunks to global cloud storage...
                       </span>
 
-                      {/* Live Ingest Stopwatch */}
+                      {/* Predictive ETA Timer */}
                       <div className="flex items-center gap-3">
                         <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/20 border border-cyan-400/40 text-cyan-300 font-bold">
                           <Timer className="w-3.5 h-3.5 animate-spin" />
-                          <span>Elapsed: {formatElapsedTimer(elapsedSeconds)}</span>
+                          <span>{etaText || 'Calculating...'}</span>
                         </div>
                         <span className="text-white text-base font-black">{progress}%</span>
                       </div>
@@ -660,8 +442,8 @@ const UploadPage = () => {
                     </div>
 
                     <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-                      <span>Speed: {uploadSpeed || 'Active fast transfer'}</span>
-                      <span>Target: Sub-90s instant pipeline</span>
+                      <span>Speed: {uploadSpeed || 'Connecting...'}</span>
+                      <span>Chunked pipeline active</span>
                     </div>
                   </div>
                 )}
@@ -695,10 +477,10 @@ const UploadPage = () => {
                   <h2 className="font-display text-2xl sm:text-3xl font-black text-white">
                     Universal Link Generated!
                   </h2>
-                  {finalConvertedTime && (
+                  {etaText && (
                     <span className="px-3 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-xs font-bold flex items-center gap-1">
                       <Sparkles className="w-3.5 h-3.5" />
-                      <span>Converted in {finalConvertedTime}</span>
+                      <span>{etaText}</span>
                     </span>
                   )}
                 </div>
@@ -789,7 +571,7 @@ const UploadPage = () => {
                   <div className="text-xs text-slate-400 font-medium">Speed Telemetry</div>
                   <div className="text-sm font-bold text-cyan-300 mt-1 uppercase flex items-center justify-center gap-1.5">
                     <Timer className="w-3.5 h-3.5 text-cyan-400" />
-                    {finalConvertedTime ? `Done in ${finalConvertedTime}` : 'Permanent Active'}
+                    {etaText || 'Permanent Active'}
                   </div>
                 </div>
               </div>

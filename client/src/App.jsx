@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
+import { UploadProvider } from './context/UploadContext';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages
@@ -17,6 +18,7 @@ import PlaybackPage from './pages/PlaybackPage';
 function App() {
   return (
     <AuthProvider>
+    <UploadProvider>
       <BrowserRouter>
         <Toaster
           position="top-right"
@@ -65,6 +67,7 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+    </UploadProvider>
     </AuthProvider>
   );
 }
