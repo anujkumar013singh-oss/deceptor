@@ -349,7 +349,79 @@ const getStreamUrl = async (fileName) => {
     .split('/')
     .map((seg) => encodeURIComponent(seg))
     .join('/');
-  return `${auth.downloadUrl}/file/${auth.bucketName}/${encodedName}?Authorization=${token}`;
+/**
+ * Get Download Authorization Token with Content-Disposition: attachment for direct Chrome downloads
+ */
+let downloadAttachmentAuthCache = {
+  authorizationToken: null,
+  expiresAt: 0,
+};
+
+const getAttachmentAuthToken = async (validDurationSeconds = 604800) => {
+  const now = Date.now();
+  if (downloadAttachmentAuthCache.authorizationToken && downloadAttachmentAuthCache.expiresAt > now) {
+    return downloadAttachmentAuthCache.authorizationToken;
+  }
+
+  let auth = await authorizeAccount();
+  try {
+    const res = await b2Request(
+      auth.apiUrl,
+      '/b2api/v2/b2_get_download_authorization',
+      'POST',
+      {
+        Authorization: auth.authorizationToken,
+        'Content-Type': 'application/json',
+      },
+      {
+        bucketId: auth.bucketId,
+        fileNamePrefix: '',
+        validDurationInSeconds: validDurationSeconds,
+        b2ContentDisposition: 'attachment',
+      }
+    );
+
+    downloadAttachmentAuthCache = {
+      authorizationToken: res.authorizationToken,
+      expiresAt: now + (validDurationSeconds - 3600) * 1000,
+    };
+
+    return res.authorizationToken;
+  } catch (err) {
+    if (err.status === 401) {
+      auth = await authorizeAccount(true);
+      const res = await b2Request(
+        auth.apiUrl,
+        '/b2api/v2/b2_get_download_authorization',
+        'POST',
+        {
+          Authorization: auth.authorizationToken,
+          'Content-Type': 'application/json',
+        },
+        {
+          bucketId: auth.bucketId,
+          fileNamePrefix: '',
+          validDurationInSeconds: validDurationSeconds,
+          b2ContentDisposition: 'attachment',
+        }
+      );
+      return res.authorizationToken;
+    }
+    throw err;
+  }
+};
+
+/**
+ * Build direct file download URL that forces Chrome to save directly into user's Downloads folder
+ */
+const getAttachmentDownloadUrl = async (fileName) => {
+  const auth = await authorizeAccount();
+  const token = await getAttachmentAuthToken();
+  const encodedName = fileName
+    .split('/')
+    .map((seg) => encodeURIComponent(seg))
+    .join('/');
+  return `${auth.downloadUrl}/file/${auth.bucketName}/${encodedName}?Authorization=${token}&b2ContentDisposition=attachment`;
 };
 
 /**
@@ -383,5 +455,6 @@ module.exports = {
   finishLargeFile,
   getDownloadAuthToken,
   getStreamUrl,
+  getAttachmentDownloadUrl,
   deleteFile,
 };

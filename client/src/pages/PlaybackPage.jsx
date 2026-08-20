@@ -39,6 +39,27 @@ const PlaybackPage = () => {
   const [showControls, setShowControls] = useState(true);
   const [copied, setCopied] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  const handleDownload = () => {
+    setDownloading(true);
+    toast.loading('Starting Chrome download...', { id: 'dl-toast' });
+    try {
+      const downloadUrl = `/api/videos/download/${shortId}`;
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = video?.originalFilename || `${video?.title || 'video'}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      toast.success('Downloading video to Chrome Downloads!', { id: 'dl-toast' });
+    } catch (err) {
+      toast.error('Download failed to start.', { id: 'dl-toast' });
+    } finally {
+      setTimeout(() => setDownloading(false), 2000);
+    }
+  };
 
   const videoRef = useRef(null);
   const playerRef = useRef(null);
@@ -314,14 +335,14 @@ const PlaybackPage = () => {
                   <Copy className="w-4 h-4" />
                   <span>{copied ? 'Copied!' : 'Copy Link'}</span>
                 </button>
-                <a
-                  href={video.streamUrl}
-                  download={video.originalFilename}
-                  className="btn btn-dark text-xs px-4 py-3 flex items-center gap-2"
+                <button
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  className="btn btn-dark text-xs px-4 py-3 flex items-center gap-2 cursor-pointer hover:border-cyan-400/40 hover:text-white transition-all shadow-lg"
                 >
-                  <Download className="w-4 h-4 text-cyan-400" />
-                  <span>Download</span>
-                </a>
+                  <Download className={`w-4 h-4 text-cyan-400 ${downloading ? 'animate-bounce' : ''}`} />
+                  <span>{downloading ? 'Downloading...' : 'Download Video'}</span>
+                </button>
               </div>
             </div>
           </div>

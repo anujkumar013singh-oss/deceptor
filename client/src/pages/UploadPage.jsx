@@ -415,35 +415,102 @@ const UploadPage = () => {
                   </div>
                 )}
 
-                {/* Progress Bar with ETA Timer */}
+                {/* Progress Bar with Re-Designed Animated Cyber Timer HUD */}
                 {state === UPLOAD_STATES.UPLOADING && (
-                  <div className="space-y-4 p-6 rounded-2xl bg-slate-950/90 border border-cyan-500/40 shadow-[0_0_30px_rgba(56,189,248,0.2)]">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-bold">
-                      <span className="text-cyan-300 flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
-                        Streaming video chunks to global cloud storage...
-                      </span>
+                  <div className="space-y-6 p-6 sm:p-8 rounded-3xl bg-slate-950/95 border border-cyan-500/40 shadow-[0_0_50px_rgba(56,189,248,0.25)] relative overflow-hidden">
+                    {/* Ambient animated background grid / glow */}
+                    <div className="absolute top-0 right-0 w-72 h-72 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+                    <div className="absolute bottom-0 left-0 w-72 h-72 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
 
-                      {/* Predictive ETA Timer */}
+                    {/* Top Header Row with Cyber Pulse & Telemetry */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/20 border border-cyan-400/40 text-cyan-300 font-bold">
-                          <Timer className="w-3.5 h-3.5 animate-spin" />
-                          <span>{etaText || 'Calculating...'}</span>
+                        <div className="relative flex items-center justify-center">
+                          <div className="w-4 h-4 rounded-full bg-cyan-400 animate-ping opacity-75" />
+                          <div className="w-2.5 h-2.5 rounded-full bg-cyan-300 absolute" />
                         </div>
-                        <span className="text-white text-base font-black">{progress}%</span>
+                        <div>
+                          <span className="text-sm font-bold text-white tracking-wide block font-display">
+                            6x Multi-Stream Ingest Active
+                          </span>
+                          <span className="text-xs text-slate-400 font-medium">
+                            Parallel encrypted chunk channels connected
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Animated Futuristic Radial Timer Capsule */}
+                      <div className="flex items-center gap-3 self-start sm:self-auto">
+                        <div className="relative px-4 py-2 rounded-2xl bg-cyan-950/50 border border-cyan-400/50 shadow-[0_0_20px_rgba(56,189,248,0.3)] flex items-center gap-2.5 group">
+                          {/* Spinning Conic Glow Halo */}
+                          <div className="w-5 h-5 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin flex-shrink-0" />
+                          
+                          <div className="flex flex-col">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400/80">
+                              Estimated Completion
+                            </span>
+                            <span className="text-sm sm:text-base font-black text-cyan-200 tracking-tight font-display drop-shadow-[0_0_10px_rgba(56,189,248,0.8)]">
+                              {etaText || 'Calculating...'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="px-3.5 py-2 rounded-2xl bg-white/[0.04] border border-white/10 text-white font-black text-lg">
+                          {progress}%
+                        </div>
                       </div>
                     </div>
 
-                    <div className="h-3.5 w-full bg-slate-900 rounded-full overflow-hidden border border-white/10 p-0.5">
+                    {/* Progress Track with Neon Laser Shimmer */}
+                    <div className="space-y-2">
+                      <div className="h-4 w-full bg-slate-900/90 rounded-full overflow-hidden border border-white/15 p-0.5 relative shadow-inner">
+                        <motion.div
+                          className="h-full bg-gradient-to-r from-blue-600 via-cyan-400 to-emerald-400 rounded-full relative overflow-hidden"
+                          initial={{ width: '0%' }}
+                          animate={{ width: `${progress}%` }}
+                          transition={{ ease: 'easeOut', duration: 0.3 }}
+                        >
+                          {/* Laser shine sweep across the progress bar */}
+                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent w-full animate-[shimmer_2s_infinite] -skew-x-12" />
+                        </motion.div>
+                      </div>
+
+                      {/* Glowing bottom progress reflection */}
                       <div
-                        className="h-full bg-gradient-to-r from-blue-600 via-cyan-400 to-indigo-500 rounded-full transition-all duration-200"
+                        className="h-1 w-full bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400 rounded-full blur-sm opacity-60 transition-all duration-300"
                         style={{ width: `${progress}%` }}
                       />
                     </div>
 
-                    <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-                      <span>Speed: {uploadSpeed || 'Connecting...'}</span>
-                      <span>Chunked pipeline active</span>
+                    {/* Live Stream Equalizer Waveform & Multi-Pipe Telemetry */}
+                    <div className="pt-2 border-t border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2 text-slate-300">
+                        <span className="font-bold text-white">Speed:</span>
+                        <span className="text-cyan-300 font-mono font-bold bg-cyan-950/40 px-2 py-0.5 rounded-md border border-cyan-500/30">
+                          {uploadSpeed || '6x Parallel Ingest'}
+                        </span>
+                      </div>
+
+                      {/* 6 Animated Equalizer Bars */}
+                      <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/[0.03] border border-white/10">
+                        <span className="text-[11px] text-slate-400 font-semibold mr-1">Streams:</span>
+                        {[...Array(6)].map((_, i) => (
+                          <span
+                            key={i}
+                            className="w-1 bg-cyan-400 rounded-full animate-pulse"
+                            style={{
+                              height: `${12 + ((i * 4) % 10)}px`,
+                              animationDelay: `${i * 150}ms`,
+                              animationDuration: '800ms',
+                            }}
+                          />
+                        ))}
+                      </div>
+
+                      <div className="text-slate-400 flex items-center gap-1.5 font-medium">
+                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Sub-90s Multi-Socket Acceleration</span>
+                      </div>
                     </div>
                   </div>
                 )}

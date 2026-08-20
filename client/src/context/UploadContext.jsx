@@ -174,9 +174,15 @@ export const UploadProvider = ({ children }) => {
 
                     const remainingBytes = file.size - totalLoaded;
                     const remainingSecs = Math.max(1, Math.round(remainingBytes / bytesPerSec));
-                    const mins = Math.floor(remainingSecs / 60);
-                    const secs = remainingSecs % 60;
-                    setEtaText(`${mins}m ${secs < 10 ? '0' : ''}${secs}s remaining`);
+                    let etaDisplay = '';
+                    if (remainingSecs < 60) {
+                      etaDisplay = `${remainingSecs}s remaining`;
+                    } else {
+                      const mins = Math.floor(remainingSecs / 60);
+                      const secs = remainingSecs % 60;
+                      etaDisplay = `${mins}m ${secs < 10 ? '0' : ''}${secs}s remaining`;
+                    }
+                    setEtaText(etaDisplay);
                   }
                 }
               };
@@ -241,11 +247,16 @@ export const UploadProvider = ({ children }) => {
         thumbnailDataUrl: meta?.thumbnailDataUrl || null,
       });
 
-      // Calculate conversion time
+      // Calculate conversion time (clean without 0m if < 60s)
       const totalSecs = (Date.now() - startTimeRef.current) / 1000;
-      const m = Math.floor(totalSecs / 60);
-      const s = Math.floor(totalSecs % 60);
-      const conversionTimeStr = `${m}m ${s < 10 ? '0' : ''}${s}s`;
+      let conversionTimeStr = '';
+      if (totalSecs < 60) {
+        conversionTimeStr = `${Math.max(1, Math.round(totalSecs))}s`;
+      } else {
+        const m = Math.floor(totalSecs / 60);
+        const s = Math.round(totalSecs % 60);
+        conversionTimeStr = `${m}m ${s < 10 ? '0' : ''}${s}s`;
+      }
 
       setProgress(100);
       setEtaText(`Converted in ${conversionTimeStr}`);

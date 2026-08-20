@@ -288,6 +288,46 @@ router.get('/stream/:shortId', async (req, res, next) => {
   }
 });
 
+/**
+ * GET /api/videos/download/:shortId
+ * Public. Forces browser / Chrome to save video file directly into user's Downloads folder.
+ */
+router.get('/download/:shortId', async (req, res, next) => {
+  try {
+    const video = await Video.findOne({ shortLinkId: req.params.shortId });
+    if (!video) {
+      return res.status(404).json({ success: false, message: 'Video not found.' });
+    }
+
+    const downloadFileName = video.originalFilename || `${video.title || 'video'}.${video.format || 'mp4'}`;
+
+    // 1. Backblaze B2 Direct Attachment Download
+    if (video.b2FileName) {
+      try {
+        const dlUrl = await b2.getAttachmentDownloadUrl(video.b2FileName);
+        return res.redirect(dlUrl);
+      } catch (b2Err) {
+        console.error('B2 Download Error:', b2Err.message);
+      }
+    }
+
+    // 2. Cloudinary CDN Attachment Download
+    if (video.cloudinarySecureUrl) {
+      const cldAttachUrl = video.cloudinarySecureUrl.replace('/upload/', '/upload/fl_attachment/');
+      return res.redirect(cldAttachUrl);
+    }
+
+    // 3. Local file download
+    if (video.localFilePath && fs.existsSync(video.localFilePath)) {
+      return res.download(video.localFilePath, downloadFileName);
+    }
+
+    return res.status(404).json({ success: false, message: 'Video file not accessible for download.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── 3. SERVE THUMBNAIL ─────────────────────────────────────────────────────
 
 /**
