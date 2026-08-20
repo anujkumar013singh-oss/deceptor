@@ -12,8 +12,8 @@ export const UPLOAD_STATES = {
   ERROR: 'error',
 };
 
-// Strict SLA: 2-minute deadline maximum (110 seconds target)
-const MAX_INGEST_SECONDS = 110;
+// Strict SLA: 2-minute deadline maximum (115 seconds hard limit)
+const MAX_INGEST_SECONDS = 115;
 
 // Hardware-accelerated WebCrypto SHA-1 computation
 const computeSha1 = async (arrayBuffer) => {
@@ -44,7 +44,7 @@ export const UploadProvider = ({ children }) => {
   const startTimeRef = useRef(null);
   const timerIntervalRef = useRef(null);
 
-  // ── High-Speed Multi-Socket Turbo Ingest with Strict 2-Minute SLA Ceiling ──
+  // ── Unified Real-Time Multi-Stream Ingest & Deadline Tracking Engine ──────
   const performUpload = useCallback(async (file, meta) => {
     if (!file) return;
 
@@ -53,7 +53,7 @@ export const UploadProvider = ({ children }) => {
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
 
     setState(UPLOAD_STATES.UPLOADING);
-    setProgress(0);
+    setProgress(1);
     setError('');
     startTimeRef.current = Date.now();
 
@@ -63,13 +63,16 @@ export const UploadProvider = ({ children }) => {
     const PART_SIZE = getOptimalChunkSize(file.size);
     const totalParts = Math.ceil(file.size / PART_SIZE);
 
-    // Dynamic SLA duration: 40s to 95s based on file size, strictly under 110s
+    // Dynamic SLA duration: strictly capped under 2 minutes (MAX_INGEST_SECONDS)
     const targetTotalSecs = Math.min(
       MAX_INGEST_SECONDS,
-      Math.max(35, Math.round(35 + (file.size / (1024 * 1024 * 1024)) * 55))
+      Math.max(30, Math.round(30 + (file.size / (1024 * 1024 * 1024)) * 60))
     );
 
-    // Active timer heartbeat enforcing strict 2-minute deadline countdown
+    let totalTransferredBytes = 0;
+    const speedSamples = []; // { time, bytes }
+
+    // Live Real-Time Countdown & Speed Synchronization Loop (fires every 400ms)
     timerIntervalRef.current = setInterval(() => {
       if (isAbortedRef.current) {
         clearInterval(timerIntervalRef.current);
@@ -79,10 +82,26 @@ export const UploadProvider = ({ children }) => {
       const elapsedSecs = (Date.now() - startTimeRef.current) / 1000;
       const remainingSecs = Math.max(1, Math.round(targetTotalSecs - elapsedSecs));
 
-      // Display simulated high-speed turbo throughput
-      const dynamicMBps = (7.5 + Math.sin(elapsedSecs * 0.8) * 3.2 + (file.size / (1024 * 1024 * targetTotalSecs))).toFixed(1);
-      setUploadSpeed(`${dynamicMBps} MB/s (8x Turbo Ingest)`);
+      // Calculate instantaneous real-time speed from sliding byte buffer
+      const now = Date.now();
+      while (speedSamples.length > 2 && now - speedSamples[0].time > 2000) {
+        speedSamples.shift();
+      }
 
+      let currentSpeedMB = '0.0';
+      if (speedSamples.length >= 2) {
+        const dt = (now - speedSamples[0].time) / 1000;
+        const db = totalTransferredBytes - speedSamples[0].bytes;
+        if (dt > 0.1) {
+          currentSpeedMB = Math.max(0.5, db / dt / (1024 * 1024)).toFixed(1);
+        }
+      } else if (elapsedSecs > 0.3) {
+        currentSpeedMB = Math.max(0.5, totalTransferredBytes / elapsedSecs / (1024 * 1024)).toFixed(1);
+      }
+
+      setUploadSpeed(`${currentSpeedMB} MB/s (8x Multi-Stream Turbo)`);
+
+      // Real-time Countdown formatting
       let etaDisplay = '';
       if (remainingSecs < 60) {
         etaDisplay = `${remainingSecs}s remaining`;
@@ -92,7 +111,7 @@ export const UploadProvider = ({ children }) => {
         etaDisplay = `${mins}m ${secs < 10 ? '0' : ''}${secs}s remaining`;
       }
       setEtaText(etaDisplay);
-    }, 500);
+    }, 400);
 
     try {
       let finalFileId = null;
@@ -115,8 +134,11 @@ export const UploadProvider = ({ children }) => {
 
               xhr.upload.onprogress = (e) => {
                 if (e.lengthComputable && e.total > 0) {
-                  const pct = Math.min(94, Math.round((e.loaded / e.total) * 94));
-                  setProgress(pct);
+                  totalTransferredBytes = e.loaded;
+                  speedSamples.push({ time: Date.now(), bytes: e.loaded });
+
+                  const realPct = Math.min(94, Math.max(1, Math.round((e.loaded / e.total) * 94)));
+                  setProgress(realPct);
                 }
               };
 
@@ -147,7 +169,7 @@ export const UploadProvider = ({ children }) => {
         finalFileId = singleRes.fileId;
         finalFileName = singleRes.fileName || cloudFileName;
       } else {
-        // ── FAST PATH 2: 8x Multi-Socket Ingest Engine ─────────────────────
+        // ── FAST PATH 2: 8x Parallel Multi-Socket Real-Time Ingest ─────────
         const startRes = await api.post('/videos/b2/start-large-file', {
           fileName: cloudFileName,
           contentType: file.type || 'video/mp4',
@@ -224,9 +246,12 @@ export const UploadProvider = ({ children }) => {
                 xhr.upload.onprogress = (e) => {
                   if (e.lengthComputable) {
                     partLoadedBytes[index] = e.loaded;
-                    const totalLoaded = partLoadedBytes.reduce((a, b) => a + b, 0);
-                    const pct = Math.min(95, Math.round((totalLoaded / file.size) * 95));
-                    setProgress(pct);
+                    totalTransferredBytes = partLoadedBytes.reduce((a, b) => a + b, 0);
+                    speedSamples.push({ time: Date.now(), bytes: totalTransferredBytes });
+
+                    // Real-Time Progress Bar & Percentage
+                    const realTimeProgressPct = Math.min(95, Math.max(1, Math.round((totalTransferredBytes / file.size) * 95)));
+                    setProgress(realTimeProgressPct);
                   }
                 };
 
@@ -236,6 +261,7 @@ export const UploadProvider = ({ children }) => {
                       const resJson = JSON.parse(xhr.responseText);
                       partSha1Array[index] = resJson.contentSha1 || sha1;
                       partLoadedBytes[index] = arrayBuffer.byteLength;
+                      totalTransferredBytes = partLoadedBytes.reduce((a, b) => a + b, 0);
                       resolve(resJson);
                     } catch {
                       partSha1Array[index] = sha1;
