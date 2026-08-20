@@ -63,11 +63,19 @@ export const UploadProvider = ({ children }) => {
     const PART_SIZE = getOptimalChunkSize(file.size);
     const totalParts = Math.ceil(file.size / PART_SIZE);
 
-    // Dynamic SLA duration: strictly capped under 2 minutes (MAX_INGEST_SECONDS)
+    // Dynamic SLA duration: strictly under 2 minutes (MAX_INGEST_SECONDS)
     const targetTotalSecs = Math.min(
       MAX_INGEST_SECONDS,
       Math.max(30, Math.round(30 + (file.size / (1024 * 1024 * 1024)) * 60))
     );
+
+    // Initial instant timer display at t=0
+    setEtaText(
+      targetTotalSecs < 60
+        ? `${targetTotalSecs}s remaining`
+        : `${Math.floor(targetTotalSecs / 60)}m ${targetTotalSecs % 60 < 10 ? '0' : ''}${targetTotalSecs % 60}s remaining`
+    );
+    setUploadSpeed('Connecting 8x Turbo Pipeline...');
 
     let totalTransferredBytes = 0;
     const speedSamples = []; // { time, bytes }
@@ -156,7 +164,6 @@ export const UploadProvider = ({ children }) => {
               xhr.setRequestHeader('Authorization', authorizationToken);
               xhr.setRequestHeader('X-Bz-File-Name', encodeURIComponent(cloudFileName));
               xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
-              xhr.setRequestHeader('Content-Length', String(file.size));
               xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
               xhr.send(file);
             });
@@ -279,7 +286,6 @@ export const UploadProvider = ({ children }) => {
                 xhr.open('POST', endpoint.uploadUrl, true);
                 xhr.setRequestHeader('Authorization', endpoint.authorizationToken);
                 xhr.setRequestHeader('X-Bz-Part-Number', String(partNumber));
-                xhr.setRequestHeader('Content-Length', String(arrayBuffer.byteLength));
                 xhr.setRequestHeader('X-Bz-Content-Sha1', sha1);
                 xhr.send(arrayBuffer);
               });
@@ -288,7 +294,8 @@ export const UploadProvider = ({ children }) => {
             } catch (chunkErr) {
               if (isAbortedRef.current) throw chunkErr;
               if (attempt >= MAX_RETRIES) throw chunkErr;
-              await new Promise((r) => setTimeout(r, Math.min(2000, 200 * Math.pow(1.3, attempt))));
+              // If pod failed or 503 error, delay briefly and fetch fresh pod endpoint
+              await new Promise((r) => setTimeout(r, Math.min(2000, 250 * Math.pow(1.3, attempt))));
             }
           }
         };

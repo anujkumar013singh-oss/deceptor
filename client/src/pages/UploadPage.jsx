@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Timer,
   Sparkles,
+  Download,
 } from 'lucide-react';
 import {
   formatDuration,
