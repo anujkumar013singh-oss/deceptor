@@ -37,6 +37,15 @@ const videoSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Backblaze B2 fields
+    b2FileId: {
+      type: String,
+      default: null,
+    },
+    b2FileName: {
+      type: String,
+      default: null,
+    },
     // Processing status
     status: {
       type: String,

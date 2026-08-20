@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 
 const UploadContext = createContext(null);
 
-const UPLOAD_STATES = {
+export const UPLOAD_STATES = {
   IDLE: 'idle',
   PREPARING: 'preparing',
   UPLOADING: 'uploading',
@@ -24,127 +24,120 @@ export const UploadProvider = ({ children }) => {
   const xhrRef = useRef(null);
   const startTimeRef = useRef(null);
 
-  // ── Chunked Upload Engine ─────────────────────────────────────────────────
-  // Uses Cloudinary's chunked upload API with 6MB chunks and Content-Range headers.
-  // This bypasses the 100MB per-file limit on Cloudinary free tier.
-  // Docs: "Chunked uploads allow files larger than the maximum file size limit for your plan."
+  // ── Backblaze B2 High-Speed Direct Ingest Engine (Unlimited 3-Hour / 10GB+) ──
   const performUpload = useCallback(async (file, meta) => {
     if (!file) return;
 
     setState(UPLOAD_STATES.UPLOADING);
     setProgress(0);
     setError('');
-    setEtaText('Calculating...');
+    setEtaText('Initializing high-speed ingest channel...');
     startTimeRef.current = Date.now();
 
     try {
-      // 1. Get signed credentials from backend
+      // 1. Get direct Backblaze B2 upload endpoint & authorization token
       const signRes = await api.get('/videos/sign-upload');
-      const { timestamp, signature, api_key, cloud_name, folder } = signRes.data;
+      const { uploadUrl, authorizationToken, downloadUrl, bucketName } = signRes.data;
 
-      const CHUNK_SIZE = 6 * 1024 * 1024; // 6MB chunks — within Cloudinary's 5-20MB recommended range
-      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-      const uniqueUploadId = `dcp_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-      const uploadEndpoint = `https://api.cloudinary.com/v1_1/${cloud_name}/video/upload`;
-
-      let finalResponse = null;
-
-      for (let i = 0; i < totalChunks; i++) {
-        const start = i * CHUNK_SIZE;
-        const end = Math.min(file.size, start + CHUNK_SIZE);
-        const chunk = file.slice(start, end);
-
-        const fd = new FormData();
-        fd.append('file', chunk);
-        fd.append('api_key', api_key);
-        fd.append('timestamp', timestamp);
-        fd.append('signature', signature);
-        fd.append('folder', folder);
-
-        const chunkResult = await new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhrRef.current = xhr;
-
-          xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) {
-              const overallBytes = start + e.loaded;
-              const pct = Math.min(94, Math.round((overallBytes / file.size) * 94));
-              setProgress(pct);
-
-              // Calculate speed & ETA
-              const elapsed = (Date.now() - startTimeRef.current) / 1000;
-              if (elapsed > 0.5) {
-                const bytesPerSec = overallBytes / elapsed;
-                const speedMB = (bytesPerSec / (1024 * 1024)).toFixed(1);
-                setUploadSpeed(`${speedMB} MB/s`);
-
-                const remainingBytes = file.size - overallBytes;
-                const remainingSecs = remainingBytes / bytesPerSec;
-                const mins = Math.floor(remainingSecs / 60);
-                const secs = Math.floor(remainingSecs % 60);
-                setEtaText(`${mins}m ${secs < 10 ? '0' : ''}${secs}s remaining`);
-              }
-            }
-          };
-
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              try { resolve(JSON.parse(xhr.responseText)); }
-              catch { resolve({}); }
-            } else {
-              let msg = 'Upload chunk failed';
-              try { msg = JSON.parse(xhr.responseText)?.error?.message || msg; }
-              catch {}
-              reject(new Error(msg));
-            }
-          };
-
-          xhr.onerror = () => reject(new Error('Network error during video transfer.'));
-
-          xhr.open('POST', uploadEndpoint);
-          xhr.setRequestHeader('X-Unique-Upload-Id', uniqueUploadId);
-          xhr.setRequestHeader('Content-Range', `bytes ${start}-${end - 1}/${file.size}`);
-          xhr.send(fd);
-        });
-
-        // The last chunk returns the final upload result with secure_url
-        if (chunkResult?.secure_url) {
-          finalResponse = chunkResult;
-        }
+      if (!uploadUrl || !authorizationToken) {
+        throw new Error('Failed to acquire storage upload endpoint.');
       }
 
-      if (!finalResponse?.secure_url) {
-        throw new Error('Cloud did not return a streaming URL. The upload may have been incomplete.');
-      }
+      setEtaText('Streaming video to cloud...');
 
-      setProgress(96);
-      setEtaText('Registering permanent link...');
+      // 2. Generate clean cloud file path
+      const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const cloudFileName = `videos/${Date.now()}_${sanitizedName}`;
 
-      // 2. Save metadata to MongoDB
-      const saveRes = await api.post('/videos/save-cloud', {
-        secure_url: finalResponse.secure_url,
-        public_id: finalResponse.public_id,
-        duration: finalResponse.duration || meta.duration,
-        width: finalResponse.width || meta.width,
-        height: finalResponse.height || meta.height,
-        bytes: finalResponse.bytes || file.size,
-        original_filename: file.name,
-        format: finalResponse.format || file.name.split('.').pop(),
-        title: file.name.replace(/\.[^/.]+$/, ''),
+      // 3. Direct streaming upload to Backblaze B2
+      const b2UploadResponse = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhrRef.current = xhr;
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && e.total > 0) {
+            const pct = Math.min(95, Math.round((e.loaded / e.total) * 95));
+            setProgress(pct);
+
+            const elapsedSec = (Date.now() - startTimeRef.current) / 1000;
+            if (elapsedSec > 0.4) {
+              const bytesPerSec = e.loaded / elapsedSec;
+              const speedMB = (bytesPerSec / (1024 * 1024)).toFixed(1);
+              setUploadSpeed(`${speedMB} MB/s (Backblaze Turbo)`);
+
+              const remainingBytes = e.total - e.loaded;
+              const remainingSecs = Math.max(1, Math.round(remainingBytes / bytesPerSec));
+              const mins = Math.floor(remainingSecs / 60);
+              const secs = remainingSecs % 60;
+              setEtaText(`${mins}m ${secs < 10 ? '0' : ''}${secs}s remaining`);
+            }
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch {
+              resolve({});
+            }
+          } else {
+            let msg = 'Upload failed';
+            try {
+              const errObj = JSON.parse(xhr.responseText);
+              msg = errObj.message || errObj.code || msg;
+            } catch {}
+            reject(new Error(msg));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error('Network error during video transfer. Please check connection.'));
+        xhr.ontimeout = () => reject(new Error('Upload timeout. Please retry.'));
+
+        xhr.open('POST', uploadUrl, true);
+        xhr.setRequestHeader('Authorization', authorizationToken);
+        xhr.setRequestHeader('X-Bz-File-Name', encodeURIComponent(cloudFileName));
+        xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+        xhr.setRequestHeader('Content-Length', String(file.size));
+        xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
+
+        xhr.send(file);
       });
 
-      // Calculate final conversion time
+      if (!b2UploadResponse?.fileId && !b2UploadResponse?.fileName) {
+        throw new Error('Storage did not return confirmation token.');
+      }
+
+      setProgress(97);
+      setEtaText('Generating universal permanent link...');
+
+      // 4. Save metadata to MongoDB Atlas
+      const saveRes = await api.post('/videos/save-cloud', {
+        fileId: b2UploadResponse.fileId,
+        fileName: b2UploadResponse.fileName || cloudFileName,
+        duration: meta?.duration || 0,
+        width: meta?.width || 1920,
+        height: meta?.height || 1080,
+        bytes: file.size,
+        original_filename: file.name,
+        format: file.name.split('.').pop() || 'mp4',
+        title: file.name.replace(/\.[^/.]+$/, ''),
+        thumbnailDataUrl: meta?.thumbnailDataUrl || null,
+      });
+
+      // Calculate conversion time
       const totalSecs = (Date.now() - startTimeRef.current) / 1000;
       const m = Math.floor(totalSecs / 60);
       const s = Math.floor(totalSecs % 60);
-      const convertedTimeStr = `${m}m ${s < 10 ? '0' : ''}${s}s`;
+      const conversionTimeStr = `${m}m ${s < 10 ? '0' : ''}${s}s`;
 
       setProgress(100);
-      setEtaText(`Completed in ${convertedTimeStr}`);
+      setEtaText(`Converted in ${conversionTimeStr}`);
       setState(UPLOAD_STATES.DONE);
       setResult(saveRes.data);
-      toast.success(`Video hosted in ${convertedTimeStr}! Link ready.`);
+      toast.success(`Video hosted in ${conversionTimeStr}! Universal link ready.`);
     } catch (err) {
+      console.error('Upload error:', err);
       setState(UPLOAD_STATES.ERROR);
       setError(err?.message || 'Transfer failed.');
       setEtaText('');
@@ -153,7 +146,6 @@ export const UploadProvider = ({ children }) => {
   }, []);
 
   const reset = useCallback(() => {
-    // Cancel any in-flight XHR
     if (xhrRef.current) {
       try { xhrRef.current.abort(); } catch {}
     }

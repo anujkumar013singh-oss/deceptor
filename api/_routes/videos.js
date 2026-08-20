@@ -2,102 +2,134 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 const multer = require('multer');
 const crypto = require('crypto');
-const { protect } = require('../_middleware/auth');
+const nanoid = (len = 10) => crypto.randomBytes(len).toString('base64url').slice(0, len);
 const Video = require('../_models/Video');
+const { protect } = require('../_middleware/auth');
+const b2 = require('../_lib/backblaze');
 
-const nanoid = (length = 10) => crypto.randomBytes(Math.ceil(length * 0.75)).toString('base64url').slice(0, length);
-const {
-  cloudinary,
-  getThumbnailUrl,
-  deleteResource,
-} = require('../_lib/cloudinary');
-
-// Ensure storage directories are serverless-safe (using os.tmpdir on Vercel)
-const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-const uploadDir = isServerless ? path.join(os.tmpdir(), 'deceptor_videos') : path.join(__dirname, '..', 'uploads', 'videos');
-const thumbDir = isServerless ? path.join(os.tmpdir(), 'deceptor_thumbs') : path.join(__dirname, '..', 'uploads', 'thumbnails');
-
+// Ensure tmp upload dir exists (serverless safe)
+const uploadDir = '/tmp/videos';
+const thumbDir = '/tmp/thumbnails';
 try {
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
   if (!fs.existsSync(thumbDir)) fs.mkdirSync(thumbDir, { recursive: true });
-} catch (e) {
-  console.warn('Storage directory initialization warning:', e.message);
-}
+} catch (_) {}
 
-// Configure Multer Disk Storage in serverless-safe directory
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
+  destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname) || '.mp4';
-    const uniqueName = `${Date.now()}-${nanoid(8)}${ext}`;
-    cb(null, uniqueName);
+    const ext = path.extname(file.originalname).toLowerCase() || '.mp4';
+    cb(null, `video-${Date.now()}-${nanoid(8)}${ext}`);
   },
 });
 
 const upload = multer({
   storage,
-  limits: {
-    fileSize: 10 * 1024 * 1024 * 1024, // 10GB limit
+  limits: { fileSize: 10 * 1024 * 1024 * 1024 }, // 10 GB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('video/') || file.mimetype === 'application/octet-stream') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only video files are supported.'));
+    }
   },
 });
 
-// ─── 0. SIGNED CLOUDINARY DIRECT UPLOAD (Bypasses Vercel Payload Limits) ───
+// ─── 1. BACKBLAZE B2 DIRECT UPLOAD SIGNER ──────────────────────────────────
 
 /**
  * GET /api/videos/sign-upload
- * Protected. Generates secure Cloudinary signature for direct browser-to-Cloudinary upload.
+ * Protected. Generates direct upload URL and token for Backblaze B2 (Supports up to 10GB / 3-hour videos).
  */
-router.get('/sign-upload', protect, (req, res) => {
+router.get('/sign-upload', protect, async (req, res) => {
   try {
-    const { generateSignedUploadParams } = require('../_lib/cloudinary');
-    const signatureData = generateSignedUploadParams('deceptor/videos');
-    res.status(200).json({ success: true, ...signatureData });
+    const uploadInfo = await b2.getUploadUrl();
+    res.status(200).json({
+      success: true,
+      provider: 'backblaze',
+      uploadUrl: uploadInfo.uploadUrl,
+      authorizationToken: uploadInfo.authorizationToken,
+      bucketId: uploadInfo.bucketId,
+      downloadUrl: uploadInfo.downloadUrl,
+      bucketName: uploadInfo.bucketName,
+    });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to sign upload request.' });
+    console.error('B2 Sign Upload Error:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to initialize cloud storage upload channel: ' + err.message,
+    });
   }
 });
 
 /**
  * POST /api/videos/save-cloud
- * Protected. Saves metadata after direct Cloudinary upload into MongoDB.
+ * Protected. Saves video metadata after high-speed Backblaze B2 upload into MongoDB.
  */
 router.post('/save-cloud', protect, async (req, res, next) => {
   try {
     const {
+      fileId,
+      fileName,
       secure_url,
-      public_id,
       duration,
       width,
       height,
       bytes,
       original_filename,
       format,
+      title,
+      thumbnailDataUrl,
     } = req.body;
 
-    if (!secure_url) {
-      return res.status(400).json({ success: false, message: 'Cloudinary video URL is required.' });
+    if (!fileName && !secure_url && !fileId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Storage file identifier or URL is required.',
+      });
     }
 
     const shortLinkId = nanoid(10);
-    const thumbnailUrl = getThumbnailUrl(public_id);
+    let streamUrl = secure_url || null;
+    let thumbnailUrl = null;
+
+    // Generate authorized high-speed streaming link from Backblaze B2
+    if (fileName) {
+      try {
+        streamUrl = await b2.getStreamUrl(fileName);
+      } catch (sErr) {
+        console.warn('Could not generate initial B2 stream URL:', sErr.message);
+      }
+    }
+
+    // Save thumbnail if client generated one
+    if (thumbnailDataUrl && thumbnailDataUrl.startsWith('data:image')) {
+      try {
+        const base64Data = thumbnailDataUrl.replace(/^data:image\/\w+;base64,/, '');
+        const thumbFilename = `${shortLinkId}-thumb.jpg`;
+        const thumbPath = path.join(thumbDir, thumbFilename);
+        fs.writeFileSync(thumbPath, Buffer.from(base64Data, 'base64'));
+        thumbnailUrl = `/api/videos/thumb/${shortLinkId}`;
+      } catch (tErr) {
+        console.warn('Thumbnail save warning:', tErr.message);
+      }
+    }
 
     const video = await Video.create({
       userId: req.user._id,
       originalFilename: original_filename || 'video.mp4',
-      title: req.body.title || original_filename || 'Untitled Video',
-      cloudinaryPublicId: public_id,
-      cloudinarySecureUrl: secure_url,
-      cloudinaryUrl: secure_url,
-      streamUrl: secure_url,
+      title: title || original_filename?.replace(/\.[^/.]+$/, '') || 'Untitled Video',
+      b2FileId: fileId || null,
+      b2FileName: fileName || null,
+      cloudinarySecureUrl: secure_url || null,
+      cloudinaryUrl: secure_url || null,
+      streamUrl: streamUrl || `/api/videos/stream/${shortLinkId}`,
       status: 'ready',
       durationSeconds: duration || 0,
       fileSizeBytes: bytes || 0,
-      format: (format || 'mp4').toLowerCase(),
+      format: (format || original_filename?.split('.').pop() || 'mp4').toLowerCase(),
       width: width || 1920,
       height: height || 1080,
       shortLinkId,
@@ -113,129 +145,24 @@ router.post('/save-cloud', protect, async (req, res, next) => {
         title: video.title,
         originalFilename: video.originalFilename,
         streamUrl: video.streamUrl,
-        cloudinarySecureUrl: video.cloudinarySecureUrl,
         thumbnailUrl: video.thumbnailUrl,
         durationSeconds: video.durationSeconds,
         fileSizeBytes: video.fileSizeBytes,
         createdAt: video.createdAt,
       },
       shareLink: `/v/${shortLinkId}`,
+      directCloudUrl: streamUrl,
     });
   } catch (err) {
     next(err);
   }
 });
 
-// ─── 1. DIRECT VIDEO UPLOAD WITH CLOUDINARY SYNC (Fallback) ───────────────────
-
-/**
- * POST /api/videos/upload-direct
- * Protected. Uploads video file directly, syncs to Cloudinary worldwide CDN.
- */
-router.post('/upload-direct', protect, upload.single('video'), async (req, res, next) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: 'No video file provided.' });
-    }
-
-    const { originalname, size, path: filePath, mimetype } = req.file;
-    const clientDuration = parseFloat(req.body.duration) || null;
-    const clientWidth = parseInt(req.body.width, 10) || null;
-    const clientHeight = parseInt(req.body.height, 10) || null;
-    const thumbnailDataUrl = req.body.thumbnailDataUrl || null;
-
-    // Generate unique 10-char short link ID
-    const shortLinkId = nanoid(10);
-
-    let directCloudUrl = null;
-    let cloudPublicId = null;
-    let thumbnailUrl = null;
-    let duration = clientDuration;
-    let width = clientWidth;
-    let height = clientHeight;
-
-    // Attempt Cloudinary Direct Upload
-    try {
-      const cRes = await cloudinary.uploader.upload(filePath, {
-        resource_type: 'video',
-        folder: 'deceptor/videos',
-      });
-
-      if (cRes?.secure_url) {
-        directCloudUrl = cRes.secure_url;
-        cloudPublicId = cRes.public_id;
-        thumbnailUrl = getThumbnailUrl(cRes.public_id);
-        if (cRes.duration) duration = cRes.duration;
-        if (cRes.width) width = cRes.width;
-        if (cRes.height) height = cRes.height;
-      }
-    } catch (cErr) {
-      console.warn('Cloudinary upload warning, falling back to stream:', cErr.message);
-    }
-
-    // Save fallback client thumbnail if Cloudinary thumbnail wasn't created
-    if (!thumbnailUrl && thumbnailDataUrl && thumbnailDataUrl.startsWith('data:image')) {
-      try {
-        const base64Data = thumbnailDataUrl.replace(/^data:image\/\w+;base64,/, '');
-        const thumbFilename = `${shortLinkId}-thumb.jpg`;
-        const thumbPath = path.join(thumbDir, thumbFilename);
-        fs.writeFileSync(thumbPath, Buffer.from(base64Data, 'base64'));
-        thumbnailUrl = `/api/videos/thumb/${shortLinkId}`;
-      } catch (tErr) {
-        console.warn('Thumbnail save warning:', tErr.message);
-      }
-    }
-
-    const streamUrl = directCloudUrl || `/api/videos/stream/${shortLinkId}`;
-
-    // Create MongoDB Video Record
-    const video = await Video.create({
-      userId: req.user._id,
-      originalFilename: originalname,
-      title: req.body.title || path.parse(originalname).name,
-      localFilePath: filePath,
-      cloudinaryPublicId: cloudPublicId,
-      cloudinarySecureUrl: directCloudUrl,
-      cloudinaryUrl: directCloudUrl,
-      streamUrl,
-      status: 'ready',
-      durationSeconds: duration,
-      fileSizeBytes: size,
-      format: (mimetype.split('/')[1] || 'mp4').toLowerCase(),
-      width,
-      height,
-      shortLinkId,
-      thumbnailUrl,
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Video hosted successfully with permanent universal link.',
-      video: {
-        _id: video._id,
-        shortLinkId: video.shortLinkId,
-        title: video.title,
-        originalFilename: video.originalFilename,
-        streamUrl: video.streamUrl,
-        cloudinarySecureUrl: video.cloudinarySecureUrl,
-        thumbnailUrl: video.thumbnailUrl,
-        durationSeconds: video.durationSeconds,
-        fileSizeBytes: video.fileSizeBytes,
-        createdAt: video.createdAt,
-      },
-      shareLink: `/v/${shortLinkId}`,
-      directCloudUrl: directCloudUrl || streamUrl,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ─── 2. HTTP 206 RANGE STREAMING ENGINE ─────────────────────────────────────
+// ─── 2. HTTP 206 RANGE STREAMING & CDN RESOLUTION ───────────────────────────
 
 /**
  * GET /api/videos/stream/:shortId
- * Public. High-performance byte-range streaming for seamless seek and autoplay.
+ * Public. Direct high-speed streaming resolution for universal player and embed.
  */
 router.get('/stream/:shortId', async (req, res, next) => {
   try {
@@ -244,58 +171,22 @@ router.get('/stream/:shortId', async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Video stream not found.' });
     }
 
-    // If video has Cloudinary CDN URL, redirect to Cloudinary CDN directly
+    // 1. Backblaze B2 Direct High-Speed CDN Stream
+    if (video.b2FileName) {
+      try {
+        const streamUrl = await b2.getStreamUrl(video.b2FileName);
+        return res.redirect(streamUrl);
+      } catch (b2Err) {
+        console.error('B2 Stream Error:', b2Err.message);
+      }
+    }
+
+    // 2. Cloudinary CDN Stream
     if (video.cloudinarySecureUrl) {
       return res.redirect(video.cloudinarySecureUrl);
     }
 
-    if (!video.localFilePath || !fs.existsSync(video.localFilePath)) {
-      return res.status(404).json({ success: false, message: 'Video file missing from storage.' });
-    }
-
-    const filePath = video.localFilePath;
-    const stat = fs.statSync(filePath);
-    const fileSize = stat.size;
-    const range = req.headers.range;
-
-    const mimeType = video.format === 'webm' ? 'video/webm' : 'video/mp4';
-
-    if (range) {
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-
-      if (start >= fileSize || end >= fileSize) {
-        res.status(416).set({ 'Content-Range': `bytes */${fileSize}` });
-        return res.end();
-      }
-
-      const chunksize = end - start + 1;
-      const fileStream = fs.createReadStream(filePath, { start, end });
-
-      const head = {
-        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-        'Accept-Ranges': 'bytes',
-        'Content-Length': chunksize,
-        'Content-Type': mimeType,
-        'Cache-Control': 'public, max-age=31536000, immutable',
-        'Access-Control-Allow-Origin': '*',
-      };
-
-      res.writeHead(206, head);
-      fileStream.pipe(res);
-    } else {
-      const head = {
-        'Content-Length': fileSize,
-        'Content-Type': mimeType,
-        'Accept-Ranges': 'bytes',
-        'Cache-Control': 'public, max-age=31536000, immutable',
-        'Access-Control-Allow-Origin': '*',
-      };
-
-      res.writeHead(200, head);
-      fs.createReadStream(filePath).pipe(res);
-    }
+    return res.status(404).json({ success: false, message: 'Video file not accessible.' });
   } catch (err) {
     next(err);
   }
@@ -337,7 +228,14 @@ router.get('/public/:shortId', async (req, res, next) => {
     video.viewCount = (video.viewCount || 0) + 1;
     await video.save();
 
-    const streamUrl = video.cloudinarySecureUrl || `/api/videos/stream/${video.shortLinkId}`;
+    let dynamicStreamUrl = video.streamUrl;
+    if (video.b2FileName) {
+      try {
+        dynamicStreamUrl = await b2.getStreamUrl(video.b2FileName);
+      } catch (err) {
+        console.warn('Failed to dynamically sign stream URL:', err.message);
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -346,8 +244,7 @@ router.get('/public/:shortId', async (req, res, next) => {
         shortLinkId: video.shortLinkId,
         title: video.title || video.originalFilename,
         originalFilename: video.originalFilename,
-        streamUrl,
-        cloudinarySecureUrl: video.cloudinarySecureUrl,
+        streamUrl: dynamicStreamUrl || `/api/videos/stream/${video.shortLinkId}`,
         thumbnailUrl: video.thumbnailUrl,
         durationSeconds: video.durationSeconds,
         fileSizeBytes: video.fileSizeBytes,
@@ -387,7 +284,7 @@ router.get('/my-history', protect, async (req, res, next) => {
 
     const formattedVideos = videos.map((v) => ({
       ...v,
-      streamUrl: v.cloudinarySecureUrl || `/api/videos/stream/${v.shortLinkId}`,
+      streamUrl: `/api/videos/stream/${v.shortLinkId}`,
     }));
 
     res.status(200).json({
@@ -418,21 +315,12 @@ router.delete('/:id', protect, async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Video not found.' });
     }
 
-    // Delete from Cloudinary if exists
-    if (video.cloudinaryPublicId) {
+    // Delete from Backblaze B2 if exists
+    if (video.b2FileId && video.b2FileName) {
       try {
-        await deleteResource(video.cloudinaryPublicId, 'video');
-      } catch (cErr) {
-        console.warn('Cloudinary delete warning:', cErr.message);
-      }
-    }
-
-    // Delete local file if present
-    if (video.localFilePath && fs.existsSync(video.localFilePath)) {
-      try {
-        fs.unlinkSync(video.localFilePath);
-      } catch (fErr) {
-        console.warn('File delete warning:', fErr.message);
+        await b2.deleteFile(video.b2FileId, video.b2FileName);
+      } catch (bErr) {
+        console.warn('B2 delete warning:', bErr.message);
       }
     }
 
