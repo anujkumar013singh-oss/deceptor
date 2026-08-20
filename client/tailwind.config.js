@@ -34,8 +34,8 @@ export default {
       },
       fontFamily: {
         display: ['Bricolage Grotesque', 'system-ui', 'sans-serif'],
-        sans: ['Elms Sans', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['Plus Jakarta Sans', 'Elms Sans', 'system-ui', 'sans-serif'],
+        mono: ['Plus Jakarta Sans', 'Elms Sans', 'system-ui', 'sans-serif'],
       },
       fontSize: {
         '7xl': ['4.5rem', { lineHeight: '1', letterSpacing: '-0.02em' }],

@@ -108,7 +108,7 @@ const HistoryPage = () => {
           />
         </div>
 
-        <div className="flex items-center gap-4 text-xs font-mono text-slate-400">
+        <div className="flex items-center gap-4 text-xs font-semibold text-slate-400">
           <span>Total Hosted: <strong className="text-white">{videos.length}</strong></span>
         </div>
       </div>
@@ -173,13 +173,13 @@ const HistoryPage = () => {
 
                     {/* Duration Badge */}
                     {video.durationSeconds && (
-                      <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md text-[10px] font-mono font-bold text-white border border-white/20">
+                      <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md text-[10px] font-bold text-white border border-white/20">
                         {formatDuration(video.durationSeconds)}
                       </div>
                     )}
 
                     {/* Views Count */}
-                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md text-[10px] font-mono text-cyan-300 flex items-center gap-1 border border-white/10">
+                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md text-[10px] font-semibold text-cyan-300 flex items-center gap-1 border border-white/10">
                       <Eye className="w-3 h-3" />
                       <span>{video.viewCount || 0} views</span>
                     </div>
@@ -190,7 +190,7 @@ const HistoryPage = () => {
                     {video.title || video.originalFilename}
                   </h3>
 
-                  <div className="flex items-center gap-2 text-xs font-mono text-slate-500 mb-4">
+                  <div className="flex items-center gap-2 text-xs font-medium text-slate-500 mb-4">
                     <span>{formatFileSize(video.fileSizeBytes)}</span>
                     <span>•</span>
                     <span>{formatDate(video.createdAt)}</span>
@@ -259,7 +259,7 @@ const HistoryPage = () => {
               />
             </div>
 
-            <div className="flex items-center justify-between text-xs font-mono text-slate-400">
+            <div className="flex items-center justify-between text-xs font-medium text-slate-400">
               <span>Universal Link: <strong className="text-white">{`${window.location.origin}/v/${previewVideo.shortLinkId}`}</strong></span>
               <button
                 onClick={() => handleCopyLink(previewVideo.shortLinkId)}
