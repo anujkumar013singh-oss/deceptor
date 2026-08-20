@@ -47,6 +47,7 @@ const UploadPage = () => {
 
   const [dragging, setDragging] = useState(false);
   const [fileObjectUrl, setFileObjectUrl] = useState('');
+  const [previewError, setPreviewError] = useState(false);
   const fileInputRef = useRef(null);
 
   // ── High-Tech Fallback Thumbnail Generator ────────────────────────────────
@@ -603,13 +604,35 @@ const UploadPage = () => {
                   ● CLOUD CDN ACTIVE
                 </span>
               </div>
-              <div className="aspect-video w-full rounded-2xl overflow-hidden bg-black border border-white/15 shadow-2xl relative">
-                <video
-                  src={videoData?.streamUrl || result?.directCloudUrl || (shortId ? `/api/videos/stream/${shortId}` : '')}
-                  controls
-                  playsInline
-                  className="w-full h-full object-contain"
-                />
+              <div className="aspect-video w-full rounded-2xl overflow-hidden bg-black border border-white/15 shadow-2xl relative flex items-center justify-center">
+                {previewError ? (
+                  <div className="p-6 text-center space-y-3 max-w-lg">
+                    <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center mx-auto text-cyan-300 shadow-[0_0_20px_rgba(56,189,248,0.3)]">
+                      <Film className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-base font-bold text-white">
+                      {(selectedFile?.name || 'Video File')} Hosted Successfully!
+                    </h4>
+                    <p className="text-xs text-slate-300 leading-relaxed font-normal">
+                      This file is preserved in its original {selectedFile?.name?.split('.').pop()?.toUpperCase() || 'RAW'} container. Chrome and browsers require MP4/WebM for direct HTML5 streaming. You can download and watch it losslessly in VLC or Media Player.
+                    </p>
+                    <a
+                      href={`/api/videos/download/${shortId}`}
+                      className="btn btn-primary text-xs px-5 py-2.5 inline-flex items-center gap-2 font-bold cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Download & Watch in VLC</span>
+                    </a>
+                  </div>
+                ) : (
+                  <video
+                    src={videoData?.streamUrl || result?.directCloudUrl || (shortId ? `/api/videos/stream/${shortId}` : '')}
+                    controls
+                    playsInline
+                    onError={() => setPreviewError(true)}
+                    className="w-full h-full object-contain"
+                  />
+                )}
               </div>
             </div>
 

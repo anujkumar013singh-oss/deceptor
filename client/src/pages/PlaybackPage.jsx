@@ -219,28 +219,64 @@ const PlaybackPage = () => {
                 ref={playerRef}
                 onMouseMove={resetControlsTimer}
                 onMouseLeave={() => playing && setShowControls(false)}
-                className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black select-none group"
+                className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black select-none group flex items-center justify-center"
               >
-                <video
-                  ref={videoRef}
-                  src={video.streamUrl}
-                  onTimeUpdate={handleTimeUpdate}
-                  onLoadedMetadata={handleLoadedMetadata}
-                  onClick={handlePlayPause}
-                  playsInline
-                  className="w-full h-full object-contain cursor-pointer"
-                />
-
-                {/* Big Center Play/Pause Button Indicator */}
-                {!playing && (
-                  <div
-                    onClick={handlePlayPause}
-                    className="absolute inset-0 flex items-center justify-center bg-black/40 cursor-pointer"
-                  >
-                    <div className="w-20 h-20 rounded-full bg-cyan-400 text-black flex items-center justify-center shadow-[0_0_40px_rgba(56,189,248,0.6)] transform hover:scale-110 transition-transform">
-                      <Play className="w-8 h-8 fill-black ml-1" />
+                {videoError ? (
+                  <div className="p-8 sm:p-12 text-center space-y-4 max-w-xl mx-auto flex flex-col items-center justify-center h-full">
+                    <div className="w-16 h-16 rounded-3xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-300 shadow-[0_0_30px_rgba(56,189,248,0.3)]">
+                      <Film className="w-8 h-8" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="font-display text-xl sm:text-2xl font-bold text-white">
+                        {video.title || video.originalFilename}
+                      </h3>
+                      <p className="text-xs text-slate-300 leading-relaxed font-normal">
+                        This video is safely hosted in its original {video.format ? `.${video.format.toUpperCase()}` : 'raw'} format ({formatFileSize(video.fileSizeBytes)}). Chrome and browser HTML5 players only render MP4/WebM formats natively.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                      <button
+                        onClick={handleDownload}
+                        disabled={downloading}
+                        className="btn btn-primary text-xs px-6 py-3.5 font-bold flex items-center gap-2"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>{downloading ? 'Starting Download...' : 'Download & Play in VLC / Player'}</span>
+                      </button>
+                      <button
+                        onClick={handleCopy}
+                        className="btn btn-dark text-xs px-5 py-3.5 font-bold flex items-center gap-2"
+                      >
+                        <Copy className="w-4 h-4" />
+                        <span>{copied ? 'Copied!' : 'Copy Universal Link'}</span>
+                      </button>
                     </div>
                   </div>
+                ) : (
+                  <>
+                    <video
+                      ref={videoRef}
+                      src={video.streamUrl}
+                      onTimeUpdate={handleTimeUpdate}
+                      onLoadedMetadata={handleLoadedMetadata}
+                      onClick={handlePlayPause}
+                      onError={() => setVideoError(true)}
+                      playsInline
+                      className="w-full h-full object-contain cursor-pointer"
+                    />
+
+                    {/* Big Center Play/Pause Button Indicator */}
+                    {!playing && (
+                      <div
+                        onClick={handlePlayPause}
+                        className="absolute inset-0 flex items-center justify-center bg-black/40 cursor-pointer"
+                      >
+                        <div className="w-20 h-20 rounded-full bg-cyan-400 text-black flex items-center justify-center shadow-[0_0_40px_rgba(56,189,248,0.6)] transform hover:scale-110 transition-transform">
+                          <Play className="w-8 h-8 fill-black ml-1" />
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* Custom Overlay Controls Strip */}
